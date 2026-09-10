@@ -15,6 +15,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { Html5Qrcode, CameraDevice } from 'html5-qrcode';
+import { ProductBarcodeBadge } from './ProductBarcodeBadge';
 
 interface BarcodeScannerProps {
   products: Product[];
@@ -22,6 +23,7 @@ interface BarcodeScannerProps {
   onOpenQuickAddProduct: (scannedBarcode: string) => void;
   onOpenAddProduct?: () => void;
   onEditProduct?: (product: Product) => void;
+  onViewBarcode?: (barcode: string, name: string, price?: number, sku?: string, category?: string) => void;
   currencySymbol: string;
 }
 
@@ -41,6 +43,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   onOpenQuickAddProduct,
   onOpenAddProduct,
   onEditProduct,
+  onViewBarcode,
   currencySymbol,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -635,9 +638,35 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                     <h4 className="font-bold text-xs text-slate-100 truncate group-hover:text-blue-400 transition-colors">
                       {product.name}
                     </h4>
-                    <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                      {product.category} • <span className="text-slate-300 font-mono">{product.barcode}</span> • {product.stock} in stock
-                    </p>
+                    <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono mt-0.5 flex-wrap">
+                      <span>{product.category}</span>
+                      <span>•</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onViewBarcode?.(product.barcode, product.name, product.unitPrice, product.sku, product.category);
+                        }}
+                        className="text-slate-300 font-mono hover:text-blue-400 hover:underline transition-colors cursor-pointer"
+                        title="Click to view & download large barcode"
+                      >
+                        {product.barcode}
+                      </button>
+                      <span>•</span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span>{product.stock} in stock</span>
+                        <ProductBarcodeBadge
+                          code={product.barcode}
+                          width={42}
+                          height={13}
+                          clickable={true}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onViewBarcode?.(product.barcode, product.name, product.unitPrice, product.sku, product.category);
+                          }}
+                        />
+                      </span>
+                    </div>
                   </div>
                 </div>
 

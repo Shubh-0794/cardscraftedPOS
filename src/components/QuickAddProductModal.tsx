@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Product } from '../types/pos';
 import { Plus, X, Barcode } from 'lucide-react';
+import { ProductBarcodeBadge } from './ProductBarcodeBadge';
 
 interface QuickAddProductModalProps {
   barcode: string | null;
@@ -61,8 +62,11 @@ export const QuickAddProductModal: React.FC<QuickAddProductModalProps> = ({
           </button>
         </div>
 
-        <div className="mb-3 px-3 py-2 bg-[#090f1c] border border-[#1b2b48] rounded-xl text-xs font-mono text-slate-300">
-          Barcode: <span className="text-blue-400 font-bold">{barcode}</span>
+        <div className="mb-3 px-3 py-2 bg-[#090f1c] border border-[#1b2b48] rounded-xl text-xs font-mono text-slate-300 flex items-center justify-between">
+          <div>
+            Barcode: <span className="text-blue-400 font-bold">{barcode}</span>
+          </div>
+          {barcode && <ProductBarcodeBadge code={barcode} width={42} height={14} />}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3 text-xs">

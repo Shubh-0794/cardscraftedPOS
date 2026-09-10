@@ -27,6 +27,7 @@ import { InventoryModal } from './components/InventoryModal';
 import { SettingsModal } from './components/SettingsModal';
 import { QuickAddProductModal } from './components/QuickAddProductModal';
 import { ProductFormModal } from './components/ProductFormModal';
+import { BarcodeViewerModal, BarcodeViewerData } from './components/BarcodeViewerModal';
 import { Trash2 } from 'lucide-react';
 
 export default function App() {
@@ -86,6 +87,21 @@ export default function App() {
   const [quickAddBarcode, setQuickAddBarcode] = useState<string | null>(null);
   const [isProductFormOpen, setIsProductFormOpen] = useState(false);
   const [productToEdit, setProductToEdit] = useState<Product | null>(null);
+  const [barcodeViewerData, setBarcodeViewerData] = useState<BarcodeViewerData | null>(null);
+
+  const handleOpenBarcodeViewer = useCallback(
+    (barcode: string, name?: string, price?: number, sku?: string, category?: string) => {
+      setBarcodeViewerData({
+        barcode,
+        name: name || 'Item Code',
+        price,
+        sku,
+        category,
+        storeName: settings.storeName || 'Cardcrafted by Shivani',
+      });
+    },
+    [settings.storeName]
+  );
 
   // Sound settings
   const [cashierName] = useState<string>('');
@@ -508,6 +524,7 @@ export default function App() {
                   setProductToEdit(prod);
                   setIsProductFormOpen(true);
                 }}
+                onViewBarcode={handleOpenBarcodeViewer}
                 currencySymbol={settings.currencySymbol}
               />
             </div>
@@ -700,6 +717,7 @@ export default function App() {
         isOpen={isInvoiceModalOpen}
         onClose={() => setIsInvoiceModalOpen(false)}
         onUpdateWhatsAppStatus={handleUpdateWhatsAppStatus}
+        onViewBarcode={handleOpenBarcodeViewer}
       />
 
       {/* 3. Parked / Held Bills Queue Modal */}
@@ -735,6 +753,7 @@ export default function App() {
           setCart((prev) => prev.filter((item) => item.product.id !== prodId));
         }}
         currencySymbol={settings.currencySymbol}
+        onViewBarcode={handleOpenBarcodeViewer}
       />
 
       {/* 6. Settings Modal (Store Profile, UPI ID, WhatsApp API keys) */}
@@ -774,6 +793,14 @@ export default function App() {
           setIsProductFormOpen(false);
           setProductToEdit(null);
         }}
+        currencySymbol={settings.currencySymbol}
+      />
+
+      {/* 9. HD Barcode Viewer & PNG Downloader Modal */}
+      <BarcodeViewerModal
+        isOpen={Boolean(barcodeViewerData)}
+        onClose={() => setBarcodeViewerData(null)}
+        data={barcodeViewerData}
         currencySymbol={settings.currencySymbol}
       />
     </div>

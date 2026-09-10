@@ -143,6 +143,40 @@ class POSAudioEngine {
       // ignore
     }
   }
+
+  /**
+   * Subtle rhythmic stepper motor & thermal feed sound for invoice printing
+   */
+  public playReceiptPrintSound() {
+    if (!this.enabled) return;
+    try {
+      const ctx = this.getContext();
+      if (!ctx) return;
+
+      const now = ctx.currentTime;
+      // Series of subtle micro thermal print stepper clicks
+      for (let i = 0; i < 8; i++) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const t = now + (i * 0.08);
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(420 + (i % 2 === 0 ? 80 : -40), t);
+        osc.frequency.exponentialRampToValueAtTime(160, t + 0.04);
+
+        gain.gain.setValueAtTime(0.06, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(t);
+        osc.stop(t + 0.045);
+      }
+    } catch {
+      // ignore
+    }
+  }
 }
 
 export const posAudio = new POSAudioEngine();

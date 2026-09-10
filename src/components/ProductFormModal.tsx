@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Product } from '../types/pos';
 import { X, Sparkles, RefreshCw, Check } from 'lucide-react';
 import { posAudio } from '../utils/audio';
+import { ProductBarcodeBadge } from './ProductBarcodeBadge';
 
 interface ProductFormModalProps {
   isOpen: boolean;
@@ -189,13 +190,16 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   <RefreshCw className="w-2.5 h-2.5" />
                 </button>
               </div>
-              <input
-                type="text"
-                placeholder="8901234567"
-                value={barcode}
-                onChange={(e) => setBarcode(e.target.value)}
-                className="w-full bg-transparent text-slate-100 font-mono text-xs focus:outline-none mt-0.5"
-              />
+              <div className="flex items-center justify-between gap-2 mt-0.5">
+                <input
+                  type="text"
+                  placeholder="8901234567"
+                  value={barcode}
+                  onChange={(e) => setBarcode(e.target.value)}
+                  className="w-full bg-transparent text-slate-100 font-mono text-xs focus:outline-none"
+                />
+                {barcode && <ProductBarcodeBadge code={barcode} width={38} height={12} />}
+              </div>
             </div>
 
             <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl px-3 pt-2 pb-1.5 focus-within:border-blue-500 transition-colors">
