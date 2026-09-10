@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    background-color: #070b14;
+    background-image: 
+      linear-gradient(to right, rgba(28, 41, 66, 0.45) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(28, 41, 66, 0.45) 1px, transparent 1px);
+    background-size: 28px 28px;
+    background-position: center center;
+  }
+  
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .font-cursive {
+    font-family: 'Dancing Script', 'Pacifico', 'Caveat', cursive;
+  }
+}
+
+/* Custom subtle scrollbar matching dark UI */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(11, 19, 37, 0.8);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(43, 62, 99, 0.9);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(59, 130, 246, 0.8);
+}
+
+/* Dedicated Print Stylesheet for ESC/POS Thermal & Standard Printers */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #modal-invoice-viewer,
+  #modal-invoice-viewer * {
+    visibility: visible;
+  }
+
+  #modal-invoice-viewer {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    background: transparent !important;
+  }
+
+  button, input, header, nav {
+    display: none !important;
+  }
+}
+
