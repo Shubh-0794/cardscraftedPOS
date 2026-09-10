@@ -1,6 +1,6 @@
 {
-  "name": "QuickPOS Retail Billing & WhatsApp Invoicing",
-  "description": "High-speed retail POS system with barcode scanning, dynamic UPI QR payments, WhatsApp invoice dispatch, and live cart management.",
+  "name": "Cardcrafted - Retail POS & Billing By Shivani",
+  "description": "High-speed retail POS system by Shivani with barcode scanning, dynamic UPI QR payments, WhatsApp invoice dispatch, and live cart management.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
