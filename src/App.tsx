@@ -30,6 +30,11 @@ import { ProductFormModal } from './components/ProductFormModal';
 import { QrCodeViewerModal, QrCodeViewerData } from './components/QrCodeViewerModal';
 import { CustomerPaymentPortal } from './components/CustomerPaymentPortal';
 import { Trash2 } from 'lucide-react';
+import {
+  supabase,
+  syncAllDataToSupabase,
+  fetchAllDataFromSupabase,
+} from './lib/supabase';
 
 export default function App() {
   // Master State
@@ -64,6 +69,11 @@ export default function App() {
     const saved = localStorage.getItem('nexus_pos_hold_carts');
     return saved ? JSON.parse(saved) : [];
   });
+
+  // Cloud Sync State
+  const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
+  const [isCloudInitialized, setIsCloudInitialized] = useState<boolean>(false);
+
 
   // Active Transaction State
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -203,7 +213,85 @@ export default function App() {
   const [cashierName] = useState<string>('');
   const [isSoundEnabled, setIsSoundEnabled] = useState<boolean>(true);
 
-  // Persistence Effects
+  // Cloud Hydration from Supabase on Initial App Mount
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadCloudData() {
+      try {
+        setIsCloudSyncing(true);
+        const cloudData = await fetchAllDataFromSupabase();
+
+        if (!isMounted) return;
+
+        if (cloudData) {
+          if (cloudData.products && cloudData.products.length > 0) {
+            setProducts(cloudData.products);
+          }
+          if (cloudData.customers && cloudData.customers.length > 0) {
+            setCustomers(cloudData.customers);
+          }
+          if (cloudData.invoices && cloudData.invoices.length > 0) {
+            setInvoices(cloudData.invoices);
+          }
+          if (cloudData.holdCarts) {
+            setHoldCarts(cloudData.holdCarts);
+          }
+          if (cloudData.settings) {
+            setSettings(cloudData.settings);
+          }
+        } else {
+          // Cloud database is initialized but empty, push current catalog/settings to Supabase
+          await syncAllDataToSupabase({
+            products,
+            customers,
+            invoices,
+            holdCarts,
+            settings,
+          });
+        }
+      } catch (err) {
+        console.warn('[Supabase] Initial cloud sync note:', err);
+      } finally {
+        if (isMounted) {
+          setIsCloudSyncing(false);
+          setIsCloudInitialized(true);
+        }
+      }
+    }
+
+    loadCloudData();
+
+    // Supabase Realtime Channel for live multi-tab & multi-device sync
+    const realtimeChannel = supabase
+      .channel('pos-cloud-channel')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'app_data' },
+        async () => {
+          try {
+            const fresh = await fetchAllDataFromSupabase();
+            if (fresh && isMounted) {
+              if (fresh.products) setProducts(fresh.products);
+              if (fresh.customers) setCustomers(fresh.customers);
+              if (fresh.invoices) setInvoices(fresh.invoices);
+              if (fresh.holdCarts) setHoldCarts(fresh.holdCarts);
+              if (fresh.settings) setSettings(fresh.settings);
+            }
+          } catch (e) {
+            console.error('Error handling realtime update:', e);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(realtimeChannel);
+    };
+  }, []);
+
+  // Persistence Effects (Local Cache)
   useEffect(() => {
     localStorage.setItem('nexus_pos_products', JSON.stringify(products));
   }, [products]);
@@ -223,6 +311,73 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('nexus_pos_hold_carts', JSON.stringify(holdCarts));
   }, [holdCarts]);
+
+  // Continuous Cloud Sync Effect (Debounced Supabase Cloud Persistence)
+  useEffect(() => {
+    if (!isCloudInitialized) return;
+
+    const timeout = setTimeout(async () => {
+      try {
+        setIsCloudSyncing(true);
+        await syncAllDataToSupabase({
+          products,
+          customers,
+          invoices,
+          holdCarts,
+          settings,
+        });
+      } catch (e) {
+        console.warn('[Supabase] Background sync notice:', e);
+      } finally {
+        setIsCloudSyncing(false);
+      }
+    }, 1500);
+
+    return () => clearTimeout(timeout);
+  }, [products, settings, customers, invoices, holdCarts, isCloudInitialized]);
+
+  // Manual Trigger to Push All Data to Supabase
+  const handleManualSyncToCloud = useCallback(async () => {
+    try {
+      setIsCloudSyncing(true);
+      const success = await syncAllDataToSupabase({
+        products,
+        customers,
+        invoices,
+        holdCarts,
+        settings,
+      });
+      return success;
+    } catch (e) {
+      console.error('Manual sync failed:', e);
+      return false;
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  }, [products, customers, invoices, holdCarts, settings]);
+
+  // Manual Trigger to Pull All Data from Supabase
+  const handleManualPullFromCloud = useCallback(async () => {
+    try {
+      setIsCloudSyncing(true);
+      const fresh = await fetchAllDataFromSupabase();
+      if (fresh) {
+        if (fresh.products && fresh.products.length > 0) setProducts(fresh.products);
+        if (fresh.customers && fresh.customers.length > 0) setCustomers(fresh.customers);
+        if (fresh.invoices && fresh.invoices.length > 0) setInvoices(fresh.invoices);
+        if (fresh.holdCarts) setHoldCarts(fresh.holdCarts);
+        if (fresh.settings) setSettings(fresh.settings);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error('Manual pull failed:', e);
+      return false;
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  }, []);
+
 
   // Audio initialization
   useEffect(() => {
@@ -582,6 +737,7 @@ export default function App() {
           onOpenSettings={() => setIsSettingsModalOpen(true)}
           onToggleSound={() => setIsSoundEnabled(!isSoundEnabled)}
           isSoundEnabled={isSoundEnabled}
+          isSyncing={isCloudSyncing}
         />
 
         {/* 5 Segmented Tabs matching Reference UI */}
@@ -854,7 +1010,7 @@ export default function App() {
         onViewBarcode={handleOpenBarcodeViewer}
       />
 
-      {/* 6. Settings Modal (Store Profile, UPI ID, WhatsApp API keys) */}
+      {/* 6. Settings Modal (Store Profile, UPI ID, Supabase Cloud DB) */}
       <SettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
@@ -863,7 +1019,14 @@ export default function App() {
           setSettings(newSettings);
           setIsSoundEnabled(newSettings.enableBeepSound);
         }}
+        productsCount={products.length}
+        customersCount={customers.length}
+        invoicesCount={invoices.length}
+        onSyncAllToCloud={handleManualSyncToCloud}
+        onPullAllFromCloud={handleManualPullFromCloud}
+        isSyncing={isCloudSyncing}
       />
+
 
       {/* 7. Quick Add Product for Unrecognized Barcode */}
       <QuickAddProductModal

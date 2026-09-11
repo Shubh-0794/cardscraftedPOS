@@ -8,6 +8,7 @@ import {
   Settings,
   PauseCircle,
   Package,
+  Database,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -21,6 +22,7 @@ interface NavbarProps {
   onOpenSettings: () => void;
   onToggleSound: () => void;
   isSoundEnabled: boolean;
+  isSyncing?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -31,6 +33,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSettings,
   onToggleSound,
   isSoundEnabled,
+  isSyncing = false,
 }) => {
   const rawStoreName = settings.storeName || 'Cardcrafted';
   const cleanStoreName = rawStoreName.replace(/by\s+shivani/gi, '').trim() || 'Cardcrafted';
@@ -48,12 +51,18 @@ export const Navbar: React.FC<NavbarProps> = ({
               By Shivani
             </span>
           </div>
-          <div className="flex items-center gap-1.5 mt-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span className="text-[10px] font-bold text-emerald-400 tracking-wider uppercase font-mono">
-              UPI &amp; WHATSAPP SYNC
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="flex items-center gap-1.5 mt-1 hover:opacity-80 transition-opacity text-left"
+            title="Supabase Database Connected - Click to manage"
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-amber-400 animate-spin' : 'bg-emerald-400 animate-pulse'}`}></span>
+            <span className="text-[10px] font-bold text-emerald-400 tracking-wider uppercase font-mono flex items-center gap-1">
+              <span>SUPABASE CLOUD SYNC</span>
+              {isSyncing && <span className="text-[9px] text-amber-300">(SYNCING...)</span>}
             </span>
-          </div>
+          </button>
         </div>
 
         {/* Right side controls */}
@@ -102,7 +111,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             type="button"
             onClick={onOpenSettings}
             className="p-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-[#131e38] transition-colors"
-            title="Store Settings"
+            title="Store Settings & Database"
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -121,3 +130,4 @@ export const Navbar: React.FC<NavbarProps> = ({
     </header>
   );
 };
+
