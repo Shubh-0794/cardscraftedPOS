@@ -741,14 +741,14 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         )}
       </div>
 
-      {/* Button Under Product: Download 24 QR Labels with Product Name in A4 Size PDF */}
+      {/* Button Under Product: Download QR Labels in A4 Size PDF (Exact count, 24 per page, no repeat) */}
       <div className="pt-2 border-t border-[#1b2b48]">
         <button
           type="button"
           onClick={handleDownload24QrSheet}
           disabled={isExportingLabels || products.length === 0}
           className="w-full py-2.5 px-3.5 bg-linear-to-r from-blue-900/40 via-[#132342] to-blue-900/40 hover:from-blue-800/60 hover:to-blue-800/60 border border-blue-500/40 hover:border-blue-400 text-slate-100 rounded-2xl text-xs font-bold flex items-center justify-between transition-all shadow-md group cursor-pointer"
-          title="Download printable A4 sheet with 24 QR labels & product names"
+          title="Download printable A4 sheet with product QR labels (24 per page, no repetition)"
         >
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
@@ -756,13 +756,13 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
             </div>
             <div className="text-left">
               <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
-                <span>Download 24 QR Labels (A4 PDF)</span>
+                <span>Download Product QR Labels (A4 PDF)</span>
                 <span className="px-1.5 py-0.2 bg-blue-500/20 text-blue-300 text-[10px] font-mono rounded border border-blue-400/30">
-                  A4 24-Up
+                  {products.length} {products.length === 1 ? 'Label' : 'Labels'} • {Math.ceil(products.length / 24) || 1} {Math.ceil(products.length / 24) <= 1 ? 'Page' : 'Pages'}
                 </span>
               </div>
               <div className="text-[10px] text-slate-400 font-normal">
-                Includes QR, product name, price & SKU ready to print
+                1 label per product • Up to 24 per A4 sheet (no repeat)
               </div>
             </div>
           </div>

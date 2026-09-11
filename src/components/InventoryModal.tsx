@@ -107,7 +107,7 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
               </span>
             </h3>
             <p className="text-[11px] text-slate-400">
-              Manage stock, pricing, SKUs, and export printable 24-QR A4 sheets
+              Manage stock, pricing, SKUs, and export printable QR label sheets (up to 24 per A4 page)
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -116,7 +116,7 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
               onClick={handleDownload24QrSheet}
               disabled={isExportingLabels || products.length === 0}
               className="px-3 py-1.5 bg-[#142340] hover:bg-[#1a2e54] text-blue-400 border border-blue-500/30 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Download 24 QR labels on A4 size sheet in PDF format"
+              title="Download printable A4 sheet with product QR labels (24 per page, no repeat)"
             >
               {labelsDownloaded ? (
                 <>
@@ -131,7 +131,7 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
               ) : (
                 <>
                   <FileDown className="w-3.5 h-3.5" />
-                  <span>Export 24 QR (A4 PDF)</span>
+                  <span>Export QR Labels (A4 PDF)</span>
                 </>
               )}
             </button>
@@ -282,7 +282,7 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
               className="px-3 py-1.5 bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600/30 rounded-xl font-bold transition-colors cursor-pointer flex items-center gap-1.5"
             >
               <FileDown className="w-3.5 h-3.5" />
-              <span>Download 24 QR A4 PDF</span>
+              <span>Download QR Labels (A4 PDF)</span>
             </button>
             <button
               onClick={onClose}

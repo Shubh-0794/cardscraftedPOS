@@ -35,17 +35,9 @@ export async function generate24QrLabelsA4Pdf(
   const gapX = 3.5;
   const gapY = 1.2;
 
-  // If products are less than 24, tile them to fill the 24 label stickers
-  const itemsToPrint: Product[] = [];
-  if (products.length < 24) {
-    let pIdx = 0;
-    for (let i = 0; i < 24; i++) {
-      itemsToPrint.push(products[pIdx % products.length]);
-      pIdx++;
-    }
-  } else {
-    itemsToPrint.push(...products);
-  }
+  // Print each product exactly once without repetition
+  // Maximum 24 labels per A4 page. If 8 products => 8 labels on Page 1. If 30 products => 24 on Page 1, 6 on Page 2.
+  const itemsToPrint: Product[] = [...products];
 
   const totalPages = Math.ceil(itemsToPrint.length / labelsPerPage);
 
