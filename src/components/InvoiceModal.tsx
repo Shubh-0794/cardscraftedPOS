@@ -3,16 +3,18 @@ import { Invoice, StoreSettings } from '../types/pos';
 import { formatCurrency } from '../utils/taxCalculator';
 import { generateWhatsAppPayloads } from '../utils/whatsapp';
 import { posAudio } from '../utils/audio';
-import { generateInvoicePdf } from '../utils/qrPdfGenerator';
+import { generateInvoicePdf, createInvoicePdfBlob } from '../utils/qrPdfGenerator';
 import {
   Printer,
   Send,
   X,
   CheckCircle2,
   RefreshCw,
-  Download,
   FileDown,
   Check,
+  Share2,
+  ExternalLink,
+  Copy,
 } from 'lucide-react';
 import { ProductQrBadge } from './ProductQrBadge';
 
@@ -36,6 +38,8 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [pdfDownloaded, setPdfDownloaded] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [animationKey, setAnimationKey] = useState<number>(0);
   const [isPrintingAnim, setIsPrintingAnim] = useState(true);
 
@@ -44,6 +48,8 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
       setAnimationKey((prev) => prev + 1);
       setIsPrintingAnim(true);
       setPdfDownloaded(false);
+      setCopiedLink(false);
+      setShareNotice(null);
       posAudio.playReceiptPrintSound();
       const timer = setTimeout(() => {
         setIsPrintingAnim(false);
@@ -84,26 +90,66 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
     }
   };
 
-  // Send PDF & dispatch WhatsApp
+  // Share PDF directly to WhatsApp or native share sheet
   const handleDispatchWhatsAppPdf = async () => {
     setIsSendingWhatsApp(true);
+    setShareNotice(null);
+
     try {
-      // 1. Generate & download the exact on-screen visual PDF
-      await generateInvoicePdf(invoice, settings);
+      // 1. Build PDF blob & File
+      const { doc, file, filename } = await createInvoicePdfBlob(invoice, settings);
+
+      // 2. Check if native Web Share with Files is supported (Android/iOS/Chrome Mobile)
+      const canNativeShareFiles =
+        typeof navigator !== 'undefined' &&
+        navigator.canShare &&
+        navigator.canShare({ files: [file] });
+
+      if (canNativeShareFiles) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: `Invoice #${invoice.invoiceNumber} - ${settings.storeName}`,
+            text: `🧾 Invoice #${invoice.invoiceNumber} from ${settings.storeName}\nCustomer: ${invoice.customer.name || 'Valued Customer'}\nTotal: ${formatCurrency(invoice.grandTotal, settings.currencySymbol)}\nView E-Bill: ${payloads.digitalInvoiceLink}`,
+          });
+          onUpdateWhatsAppStatus(invoice.id, 'sent');
+          setPdfDownloaded(true);
+          posAudio.playSuccessChime();
+          setIsSendingWhatsApp(false);
+          return;
+        } catch (shareErr: any) {
+          // If user cancelled native share, do nothing or fallback
+          if (shareErr.name === 'AbortError') {
+            setIsSendingWhatsApp(false);
+            return;
+          }
+          console.warn('Native file share failed, falling back to download + WhatsApp link:', shareErr);
+        }
+      }
+
+      // Fallback: Download PDF file & launch WhatsApp chat with full invoice details
+      doc.save(filename);
       setPdfDownloaded(true);
       posAudio.playSuccessChime();
 
-      // 2. Open WhatsApp Web / App with invoice details
+      setShareNotice('PDF downloaded! Attach it directly in WhatsApp.');
       window.open(payloads.waMeLink, '_blank', 'noopener,noreferrer');
 
+      onUpdateWhatsAppStatus(invoice.id, 'sent');
       setTimeout(() => {
         setIsSendingWhatsApp(false);
-        onUpdateWhatsAppStatus(invoice.id, 'sent');
-      }, 800);
+      }, 1000);
     } catch (err) {
       console.error('Error in WhatsApp PDF dispatch:', err);
       setIsSendingWhatsApp(false);
     }
+  };
+
+  const handleCopyInvoiceLink = () => {
+    navigator.clipboard.writeText(payloads.digitalInvoiceLink);
+    setCopiedLink(true);
+    posAudio.playScanBeep();
+    setTimeout(() => setCopiedLink(false), 2500);
   };
 
   return (
@@ -122,7 +168,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
               <h3 className="font-bold text-sm text-slate-100 flex items-center gap-1.5">
                 <span>Sale Complete</span>
                 <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-950/80 text-emerald-300 font-mono border border-emerald-500/30">
-                  PAID
+                  {invoice.paymentStatus === 'success' ? 'PAID' : invoice.paymentStatus.toUpperCase()}
                 </span>
               </h3>
               <p className="text-[11px] text-slate-400 font-mono">Invoice #{invoice.invoiceNumber}</p>
@@ -158,165 +204,159 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
                   isPrintingAnim ? 'bg-emerald-400 animate-printer-led' : 'bg-emerald-500'
                 }`}
               />
-              <span className="text-[10px] font-mono font-extrabold uppercase tracking-wider text-slate-300">
-                POS-80 THERMAL PRINTER
+              <span className="text-[10px] font-mono tracking-widest text-slate-300 font-bold uppercase">
+                {isPrintingAnim ? 'PRINTING 80MM RECEIPT...' : 'THERMAL RECEIPT READY'}
               </span>
             </div>
-            <span className="text-[9px] font-mono font-bold text-emerald-400/90 uppercase">
-              {isPrintingAnim ? 'FEEDING PAPER...' : 'READY'}
-            </span>
-
-            {/* Serrated Tear Slot Mouth */}
-            <div className="absolute -bottom-1.5 left-2 right-2 h-1.5 bg-[#020408] rounded-full shadow-inner border-b border-[#2d426d]/40" />
+            <span className="text-[9px] font-mono text-slate-500 font-bold">POS-80</span>
           </div>
 
-          {/* Animated Feed-out Receipt Paper */}
-          <div
-            key={animationKey}
-            className="w-full max-w-[340px] relative z-10 origin-top animate-paper-feed"
-          >
-            {/* White/Dark Print Receipt Sheet */}
+          {/* Paper Output Container */}
+          <div className="w-full max-w-[340px] overflow-hidden relative pb-4">
+            {/* The Bill Paper (Animates downward) */}
             <div
-              id="printable-receipt"
-              className="bg-[#0b1325] border-x border-b border-[#1d2f50] rounded-b-2xl p-4 sm:p-5 space-y-4 shadow-2xl relative overflow-hidden"
+              key={animationKey}
+              className="receipt-feed-paper bg-white text-slate-900 shadow-2xl p-4 sm:p-5 font-mono text-xs border-x border-b border-slate-300 rounded-b-lg relative"
             >
-              {/* Laser Print Scan Sweep Effect during printing */}
-              {isPrintingAnim && (
-                <div className="absolute inset-x-0 h-10 bg-linear-to-b from-blue-500/20 via-emerald-400/30 to-transparent pointer-events-none animate-scan-sweep z-30" />
-              )}
-
-              {/* Store Header Info */}
-              <div className="text-center space-y-1 pb-3 border-b border-dashed border-[#1f3152]">
-                <h2 className="font-black text-base text-slate-100 uppercase tracking-wide">
-                  {settings.storeName || 'Cardcrafted'}
+              {/* Paper Watermark Texture */}
+              <div className="text-center space-y-1 pb-3 border-b border-dashed border-slate-300">
+                <h2 className="font-extrabold text-base tracking-tight text-slate-900 uppercase">
+                  {(settings.storeName || 'Cardcrafted').replace(/by\s+shivani/gi, '').trim() || 'Cardcrafted'}
                 </h2>
-                <div className="text-[11px] font-bold text-blue-400">
+                <div className="text-[11px] font-bold text-blue-600 font-sans tracking-wide">
                   By Shivani
                 </div>
-                {settings.address && (
-                  <p className="text-[10px] text-slate-400 leading-tight">{settings.address}</p>
+                {settings.tagline && (
+                  <p className="text-[10px] text-slate-500 uppercase tracking-widest font-sans">
+                    {settings.tagline}
+                  </p>
                 )}
-                {settings.gstin && (
-                  <p className="text-[10px] text-slate-400 font-mono">GSTIN: {settings.gstin}</p>
+                {settings.address && (
+                  <p className="text-[10px] text-slate-500 leading-tight pt-0.5">{settings.address}</p>
                 )}
                 {settings.phone && (
-                  <p className="text-[10px] text-slate-400 font-mono">Ph: {settings.phone}</p>
+                  <p className="text-[10px] text-slate-500">Phone: {settings.phone}</p>
+                )}
+                {settings.gstin && (
+                  <p className="text-[10px] font-bold text-slate-700">GSTIN: {settings.gstin}</p>
                 )}
               </div>
 
-              {/* Invoice Meta */}
-              <div className="text-[11px] font-mono space-y-1 text-slate-300 pb-2 border-b border-dashed border-[#1f3152]">
-                <div className="flex justify-between">
-                  <span className="text-slate-400">INVOICE:</span>
-                  <span className="font-bold text-slate-100">#{invoice.invoiceNumber}</span>
+              {/* Meta information */}
+              <div className="py-2.5 border-b border-dashed border-slate-300 space-y-1 text-[11px]">
+                <div className="flex justify-between font-bold">
+                  <span>INVOICE: #{invoice.invoiceNumber}</span>
+                  <span className="text-emerald-700 uppercase">
+                    {invoice.paymentStatus === 'success' ? 'PAID' : invoice.paymentStatus}
+                  </span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">DATE:</span>
-                  <span>{new Date(invoice.timestamp).toLocaleDateString()} {new Date(invoice.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <div className="flex justify-between text-slate-600 text-[10px]">
+                  <span>DATE: {new Date(invoice.timestamp).toLocaleDateString()}</span>
+                  <span>{new Date(invoice.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">PAYMENT:</span>
-                  <span className="font-bold text-emerald-400 uppercase">{invoice.paymentMethod} (PAID)</span>
+                <div className="flex justify-between text-slate-600 text-[10px]">
+                  <span>PAY METHOD:</span>
+                  <span className="font-bold text-slate-800 uppercase">{invoice.paymentMethod}</span>
                 </div>
                 {invoice.customer && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">CUSTOMER:</span>
-                    <span className="truncate max-w-[160px] text-slate-200">{invoice.customer.name} ({invoice.customer.phone})</span>
+                  <div className="pt-1 text-[10px] text-slate-700">
+                    <span>CUSTOMER: </span>
+                    <span className="font-bold">{invoice.customer.name}</span>
+                    {invoice.customer.phone && <span className="text-slate-500"> ({invoice.customer.phone})</span>}
                   </div>
                 )}
               </div>
 
-              {/* Items List */}
-              <div className="space-y-2 py-1 text-xs">
-                {invoice.items.map((item) => (
-                  <div key={item.id} className="flex justify-between items-start gap-2">
-                    <div className="min-w-0">
-                      <p className="font-medium text-slate-200 truncate">{item.product.name}</p>
-                      <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
-                        <span>{item.quantity} × {formatCurrency(item.unitPrice, settings.currencySymbol)}</span>
-                        {item.product.barcode && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onViewBarcode?.(
-                                item.product.barcode,
-                                item.product.name,
-                                item.product.unitPrice,
-                                item.product.sku,
-                                item.product.category
-                              )
-                            }
-                            title="Click to view big QR Code"
-                            className="inline-flex hover:scale-105 transition-transform cursor-pointer"
-                          >
-                            <ProductQrBadge code={item.product.barcode} size={14} />
-                          </button>
+              {/* Items Table */}
+              <div className="py-2.5 border-b border-dashed border-slate-300">
+                <div className="flex justify-between text-[10px] font-extrabold text-slate-500 pb-1 border-b border-slate-200 uppercase">
+                  <span>ITEM / QTY</span>
+                  <span>TOTAL</span>
+                </div>
+
+                <div className="space-y-1.5 pt-1.5">
+                  {invoice.items.map((item, idx) => (
+                    <div key={idx} className="text-[11px]">
+                      <div className="flex justify-between font-bold text-slate-900">
+                        <span className="truncate pr-2">{item.product.name}</span>
+                        <span>{formatCurrency(item.totalAmount, settings.currencySymbol)}</span>
+                      </div>
+                      <div className="flex justify-between text-[10px] text-slate-500">
+                        <span>
+                          {item.quantity} {item.product.unit || 'pcs'} × {formatCurrency(item.unitPrice, settings.currencySymbol)}
+                        </span>
+                        {item.discountValue > 0 && (
+                          <span className="text-emerald-600 font-bold">
+                            Saved {item.discountType === 'percent' ? `${item.discountValue}%` : formatCurrency(item.discountValue, settings.currencySymbol)}
+                          </span>
                         )}
                       </div>
                     </div>
-                    <span className="font-bold text-slate-100 font-mono shrink-0">
-                      {formatCurrency(item.totalAmount, settings.currencySymbol)}
-                    </span>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
 
-              {/* Financials Breakdown */}
-              <div className="space-y-1.5 text-xs">
-                <div className="flex justify-between text-slate-400">
-                  <span>Subtotal</span>
-                  <span className="font-mono text-slate-200">
-                    {formatCurrency(invoice.subtotal, settings.currencySymbol)}
-                  </span>
+              {/* Financial Calculation Breakdown */}
+              <div className="py-2.5 space-y-1 text-[11px] border-b border-dashed border-slate-300">
+                <div className="flex justify-between text-slate-600">
+                  <span>Subtotal:</span>
+                  <span>{formatCurrency(invoice.subtotal, settings.currencySymbol)}</span>
                 </div>
 
+                {invoice.itemDiscountsTotal > 0 && (
+                  <div className="flex justify-between text-emerald-600 font-bold">
+                    <span>Item Discounts:</span>
+                    <span>-{formatCurrency(invoice.itemDiscountsTotal, settings.currencySymbol)}</span>
+                  </div>
+                )}
+
                 {invoice.billDiscountAmount > 0 && (
-                  <div className="flex justify-between text-emerald-400">
-                    <span>Discount</span>
-                    <span className="font-mono">
-                      -{formatCurrency(invoice.billDiscountAmount, settings.currencySymbol)}
-                    </span>
+                  <div className="flex justify-between text-emerald-600 font-bold">
+                    <span>Bill Discount:</span>
+                    <span>-{formatCurrency(invoice.billDiscountAmount, settings.currencySymbol)}</span>
                   </div>
                 )}
 
-                {invoice.taxSummary && invoice.taxSummary.totalGst > 0 && (
-                  <div className="flex justify-between text-slate-400 text-[11px]">
-                    <span>GST (Tax Inc.)</span>
-                    <span className="font-mono">
-                      {formatCurrency(invoice.taxSummary.totalGst, settings.currencySymbol)}
-                    </span>
+                {invoice.totalTax > 0 && (
+                  <div className="flex justify-between text-slate-600">
+                    <span>GST (Tax Incl.):</span>
+                    <span>{formatCurrency(invoice.totalTax, settings.currencySymbol)}</span>
                   </div>
                 )}
 
-                <div className="flex justify-between font-bold text-sm text-slate-100 pt-2 border-t border-[#1f3152]">
-                  <span>Total Paid</span>
-                  <span className="font-mono text-blue-400 font-extrabold text-base">
+                {invoice.roundOff !== 0 && (
+                  <div className="flex justify-between text-slate-600 text-[10px]">
+                    <span>Round-off:</span>
+                    <span>{invoice.roundOff > 0 ? '+' : ''}{formatCurrency(invoice.roundOff, settings.currencySymbol)}</span>
+                  </div>
+                )}
+
+                {/* Grand Total */}
+                <div className="flex justify-between items-center pt-2 font-extrabold text-sm text-slate-900 border-t border-slate-800">
+                  <span>TOTAL PAID:</span>
+                  <span className="text-blue-700 text-base font-black">
                     {formatCurrency(invoice.grandTotal, settings.currencySymbol)}
                   </span>
                 </div>
               </div>
 
-              {/* Invoice QR Code & Footer Note */}
-              <div className="pt-2 text-center space-y-2 border-t border-dashed border-[#1f3152]">
-                <div className="flex flex-col items-center justify-center gap-1.5 py-1">
+              {/* QR Code section */}
+              <div className="pt-3 pb-1 text-center space-y-2">
+                <div className="flex justify-center">
                   <button
                     type="button"
                     onClick={() =>
                       onViewBarcode?.(
-                        invoice.invoiceNumber,
-                        `Invoice #${invoice.invoiceNumber}`,
+                        `INVOICE-${invoice.invoiceNumber}`,
+                        `Bill #${invoice.invoiceNumber}`,
                         invoice.grandTotal
                       )
                     }
-                    className="cursor-pointer group flex flex-col items-center gap-1"
-                    title="Click to view & download high-res invoice QR Code"
+                    className="p-2 bg-slate-50 border border-slate-200 rounded-xl hover:bg-blue-50 transition-colors group flex flex-col items-center cursor-pointer"
+                    title="Click to view & download large QR"
                   >
-                    <ProductQrBadge
-                      code={invoice.invoiceNumber}
-                      size={44}
-                      className="p-1 bg-white rounded-lg shadow-sm group-hover:ring-2 ring-blue-400/60 transition-all"
-                    />
-                    <span className="text-[9px] font-mono text-slate-400 group-hover:text-blue-400 transition-colors">
+                    <ProductQrBadge code={`INVOICE:${invoice.invoiceNumber}|TOTAL:${invoice.grandTotal}`} size={28} />
+                    <span className="text-[9px] text-slate-500 font-sans mt-1 group-hover:text-blue-600 font-medium">
                       Scan QR Code to verify bill
                     </span>
                   </button>
@@ -333,17 +373,43 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
           </div>
         </div>
 
-        {/* Action Buttons - PDF First */}
+        {/* Online Invoice Link Pill */}
+        <div className="px-4 py-2 bg-[#070c17] border-t border-[#1b2b48] flex items-center justify-between text-[11px] shrink-0">
+          <div className="flex items-center gap-1.5 text-slate-400 truncate max-w-[240px]">
+            <ExternalLink className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+            <span className="truncate font-mono text-[10px] text-slate-300">
+              {payloads.digitalInvoiceLink}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleCopyInvoiceLink}
+            className="px-2 py-0.5 rounded-lg bg-[#14223d] hover:bg-[#1a2d52] text-blue-400 text-[10px] font-bold font-mono transition-colors flex items-center gap-1 cursor-pointer"
+          >
+            {copiedLink ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+            <span>{copiedLink ? 'Copied' : 'Copy Link'}</span>
+          </button>
+        </div>
+
+        {shareNotice && (
+          <div className="px-4 py-1.5 bg-emerald-950/60 border-t border-emerald-500/30 text-emerald-300 text-[11px] flex items-center gap-1.5 font-mono">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>{shareNotice}</span>
+          </div>
+        )}
+
+        {/* Action Buttons - PDF & WhatsApp First */}
         <div className="p-4 border-t border-[#1b2b48] bg-[#090f1c] space-y-2 shrink-0">
-          {/* Primary Button: Send WhatsApp as PDF */}
+          {/* Primary Button: Share PDF directly to WhatsApp */}
           <button
             type="button"
             onClick={handleDispatchWhatsAppPdf}
             disabled={isSendingWhatsApp}
             className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white rounded-2xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 transition-all cursor-pointer"
+            title="Share PDF invoice directly to WhatsApp"
           >
             <Send className="w-4 h-4" />
-            <span>{isSendingWhatsApp ? 'Preparing PDF Invoice...' : 'Send Invoice as PDF (WhatsApp)'}</span>
+            <span>{isSendingWhatsApp ? 'Preparing PDF Invoice...' : 'Share PDF Directly to WhatsApp'}</span>
           </button>
 
           <div className="grid grid-cols-3 gap-2">

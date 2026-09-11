@@ -98,6 +98,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     }
   }, [isOpen, activeTab, upiDeepLink]);
 
+  // Generate stable temporary invoice number for current transaction session
+  const invoiceNumberTemp = useMemo(() => {
+    return `INV-${Math.floor(100000 + Math.random() * 900000)}`;
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSendWhatsAppPaymentLink = () => {
@@ -106,9 +111,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       customerName: whatsAppCustomerName || customer?.name || 'Customer',
       amount: calculation.grandTotal,
       currencySymbol: settings.currencySymbol || '₹',
-      storeName: settings.storeName || 'QuickPOS',
+      storeName: settings.storeName || 'Cardcrafted by Shivani',
       upiId: settings.upiId,
       upiDeepLink,
+      invoiceNumber: invoiceNumberTemp,
     });
 
     window.open(waUrl, '_blank', 'noopener,noreferrer');
@@ -121,9 +127,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       customerName: whatsAppCustomerName || customer?.name || 'Customer',
       amount: calculation.grandTotal,
       currencySymbol: settings.currencySymbol || '₹',
-      storeName: settings.storeName || 'QuickPOS',
+      storeName: settings.storeName || 'Cardcrafted by Shivani',
       upiId: settings.upiId,
       upiDeepLink,
+      invoiceNumber: invoiceNumberTemp,
     });
     navigator.clipboard.writeText(message);
     setCopiedLink(true);

@@ -4,8 +4,8 @@ import { Product, Invoice, StoreSettings } from '../types/pos';
 import { formatCurrency } from './taxCalculator';
 
 /**
- * Generates an A4 PDF containing exactly 24 QR sticker labels per sheet
- * Grid: 3 columns × 8 rows (Standard Avery 24-up label sheet layout)
+ * Generates an A4 PDF containing QR sticker labels
+ * Grid: 3 columns × 8 rows (Max 24 labels per page, exact count, no repeat)
  */
 export async function generate24QrLabelsA4Pdf(
   products: Product[],
@@ -72,112 +72,113 @@ export async function generate24QrLabelsA4Pdf(
       (page + 1) * labelsPerPage
     );
 
-    for (let i = 0; i < pageItems.length; i++) {
-      const product = pageItems[i];
-      const col = i % cols;
-      const row = Math.floor(i / cols);
+    for (let index = 0; index < pageItems.length; index++) {
+      const product = pageItems[index];
+      const col = index % cols;
+      const row = Math.floor(index / cols);
 
       const x = marginLeft + col * (labelWidth + gapX);
       const y = marginTop + row * (labelHeight + gapY);
 
-      // Label background & border with subtle cut guide
-      doc.setFillColor(255, 255, 255);
-      doc.roundedRect(x, y, labelWidth, labelHeight, 1.5, 1.5, 'F');
+      // Label background card with fine outline for cutting guides
       doc.setDrawColor(203, 213, 225); // slate-300
       doc.setLineWidth(0.2);
-      doc.roundedRect(x, y, labelWidth, labelHeight, 1.5, 1.5, 'S');
+      doc.roundedRect(x, y, labelWidth, labelHeight, 2, 2, 'S');
 
-      // Top mini header: Store brand tag
+      // Top brand banner
+      doc.setFillColor(15, 23, 42); // slate-900
+      doc.roundedRect(x + 0.5, y + 0.5, labelWidth - 1, 4.5, 1.5, 1.5, 'F');
+
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(5.5);
-      doc.setTextColor(59, 130, 246); // blue-600
-      const storeTag = (settings.storeName || 'Cardcrafted').toUpperCase();
-      doc.text(storeTag, x + 3, y + 3.5);
+      doc.setFontSize(6.5);
+      doc.setTextColor(255, 255, 255);
+      const brandText = (settings.storeName || 'Cardcrafted').toUpperCase();
+      doc.text(brandText, x + labelWidth / 2, y + 3.6, { align: 'center' });
 
-      if (product.category) {
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(5);
-        doc.setTextColor(100, 116, 139);
-        const catStr = product.category.slice(0, 16);
-        doc.text(catStr, x + labelWidth - 3, y + 3.5, { align: 'right' });
-      }
-
-      // Divider line
-      doc.setDrawColor(226, 232, 240);
-      doc.setLineWidth(0.15);
-      doc.line(x + 2, y + 4.8, x + labelWidth - 2, y + 4.8);
-
-      // Draw QR Code Image (Left side)
-      const qrCode = (product.barcode || product.id).trim();
-      const qrDataUrl = qrCache[qrCode];
-      const qrSize = 22;
+      // QR Code on Left
+      const qrDataUrl = qrCache[(product.barcode || product.id).trim()];
+      const qrSize = 20.5;
       const qrX = x + 2.5;
       const qrY = y + 6;
 
       if (qrDataUrl) {
         doc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
+      } else {
+        doc.setFillColor(241, 245, 249);
+        doc.rect(qrX, qrY, qrSize, qrSize, 'F');
       }
 
-      // Right side: Product Name, Price, and SKU
-      const textX = x + qrSize + 4.5;
-      const maxTextWidth = labelWidth - qrSize - 6.5;
+      // Code text under QR
+      doc.setFont('courier', 'bold');
+      doc.setFontSize(6);
+      doc.setTextColor(51, 65, 85);
+      const displayCode = product.barcode || product.id;
+      doc.text(displayCode, qrX + qrSize / 2, qrY + qrSize + 2.6, { align: 'center' });
 
-      // Product Title (wrapped up to 2 lines)
+      // Right Column: Product details
+      const textX = x + 25;
+      let textY = y + 8.5;
+
+      // Product Name (wrapped if needed)
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(7.5);
       doc.setTextColor(15, 23, 42); // slate-900
-      const titleLines = doc.splitTextToSize(product.name, maxTextWidth);
-      const displayedTitle = titleLines.slice(0, 2);
-      doc.text(displayedTitle, textX, y + 8.5);
+      const maxTitleWidth = labelWidth - 27;
+      const titleLines = doc.splitTextToSize(product.name, maxTitleWidth);
+      const linesToShow = titleLines.slice(0, 2);
+      doc.text(linesToShow, textX, textY);
+      textY += linesToShow.length * 3.2;
 
-      // Price Tag (Bold Prominent)
-      const priceY = y + 18.5;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.setTextColor(29, 78, 216); // blue-700
-      const priceText = formatCurrency(product.unitPrice, settings.currencySymbol);
-      doc.text(priceText, textX, priceY);
-
-      if (product.mrp && product.mrp > product.unitPrice) {
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(5.5);
-        doc.setTextColor(148, 163, 184);
-        doc.text(`MRP: ${formatCurrency(product.mrp, settings.currencySymbol)}`, textX, priceY + 3.2);
-      }
-
-      // SKU / QR code number at bottom
-      doc.setFont('courier', 'bold');
+      // Category / SKU
+      doc.setFont('helvetica', 'normal');
       doc.setFontSize(5.5);
-      doc.setTextColor(71, 85, 105); // slate-600
-      const codeLabel = `QR: ${qrCode.slice(-10)}`;
-      doc.text(codeLabel, textX, y + labelHeight - 3);
+      doc.setTextColor(100, 116, 139); // slate-500
+      const skuCat = `${product.category} • SKU: ${product.sku || 'N/A'}`;
+      doc.text(doc.splitTextToSize(skuCat, maxTitleWidth)[0] || '', textX, textY);
+      textY += 3.6;
 
-      if (product.sku) {
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(5);
-        doc.setTextColor(148, 163, 184);
-        doc.text(product.sku, x + labelWidth - 3, y + labelHeight - 3, { align: 'right' });
-      }
+      // Selling Price Highlight Pill
+      doc.setFillColor(238, 242, 255); // indigo-50
+      doc.roundedRect(textX - 0.5, textY - 2.5, maxTitleWidth + 1, 6.2, 1, 1, 'F');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(29, 78, 216); // blue-700
+      const priceText = `MRP ${formatCurrency(product.unitPrice, settings.currencySymbol)}`;
+      doc.text(priceText, textX + 1, textY + 1.8);
     }
+
+    // Page footer note
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(148, 163, 184);
+    doc.text(
+      `Page ${page + 1} of ${totalPages} — Printable Retail QR Labels (Cardcrafted)`,
+      pageWidth / 2,
+      pageHeight - 4,
+      { align: 'center' }
+    );
   }
 
-  // Trigger browser download
-  const dateStr = new Date().toISOString().slice(0, 10);
-  doc.save(`Cardcrafted_24_QR_Labels_${dateStr}.pdf`);
+  const filename = `Product_QR_Labels_${new Date().toISOString().slice(0, 10)}.pdf`;
+  doc.save(filename);
 }
 
 /**
- * Generates an exact visual PDF matching the on-screen invoice receipt layout
+ * Builds the visual thermal receipt PDF document (80mm standard width)
  */
-export async function generateInvoicePdf(
+export async function buildInvoicePdfDoc(
   invoice: Invoice,
   settings: StoreSettings
-): Promise<Blob> {
-  // 80mm thermal receipt standard layout: 80mm width × 210mm height
+): Promise<jsPDF> {
+  const itemCount = invoice.items.length;
+  // Calculate dynamic page height to avoid clipping
+  const calculatedHeight = Math.max(180, 130 + itemCount * 10);
+
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
-    format: [80, 220],
+    format: [80, calculatedHeight],
   });
 
   const pageWidth = 80;
@@ -185,7 +186,7 @@ export async function generateInvoicePdf(
 
   // Background
   doc.setFillColor(255, 255, 255);
-  doc.rect(0, 0, pageWidth, 220, 'F');
+  doc.rect(0, 0, pageWidth, calculatedHeight, 'F');
 
   // Store Header
   doc.setFont('helvetica', 'bold');
@@ -210,6 +211,14 @@ export async function generateInvoicePdf(
     curY += addrLines.length * 3 + 1;
   }
 
+  if (settings.phone) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Phone: ${settings.phone}`, pageWidth / 2, curY, { align: 'center' });
+    curY += 3.5;
+  }
+
   if (settings.gstin) {
     doc.setFont('courier', 'normal');
     doc.setFontSize(6.5);
@@ -230,7 +239,8 @@ export async function generateInvoicePdf(
   doc.setFontSize(7.5);
   doc.setTextColor(15, 23, 42);
   doc.text(`INVOICE: #${invoice.invoiceNumber}`, 5, curY);
-  doc.text(`STATUS: PAID`, pageWidth - 5, curY, { align: 'right' });
+  const statusLabel = invoice.paymentStatus === 'success' ? 'PAID' : invoice.paymentStatus.toUpperCase();
+  doc.text(`STATUS: ${statusLabel}`, pageWidth - 5, curY, { align: 'right' });
   curY += 3.5;
 
   doc.setFont('courier', 'normal');
@@ -241,11 +251,11 @@ export async function generateInvoicePdf(
   doc.text(`PAY: ${invoice.paymentMethod.toUpperCase()}`, pageWidth - 5, curY, { align: 'right' });
   curY += 3.5;
 
-  if (invoice.customer) {
+  if (invoice.customer && invoice.customer.name) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(15, 23, 42);
-    doc.text(`Customer: ${invoice.customer.name} (${invoice.customer.phone})`, 5, curY);
+    doc.text(`Customer: ${invoice.customer.name} (${invoice.customer.phone || 'N/A'})`, 5, curY);
     curY += 4;
   }
 
@@ -262,7 +272,6 @@ export async function generateInvoicePdf(
   curY += 3.5;
 
   // Items List
-  doc.setFont('helvetica', 'normal');
   for (const item of invoice.items) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
@@ -318,14 +327,19 @@ export async function generateInvoicePdf(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(15, 23, 42);
-  doc.text('TOTAL PAID', 5, curY);
+  doc.text('TOTAL AMOUNT', 5, curY);
   doc.setTextColor(29, 78, 216);
   doc.text(formatCurrency(invoice.grandTotal, settings.currencySymbol), pageWidth - 5, curY, { align: 'right' });
   curY += 6;
 
-  // Invoice QR Code
+  // Invoice QR Code (Encodes verifying invoice web link)
   try {
-    const qrDataUrl = await QRCode.toDataURL(`INVOICE:${invoice.invoiceNumber}|TOTAL:${invoice.grandTotal}|STORE:${settings.storeName}`, {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const verifyPayload = origin
+      ? `${origin}/?view_invoice=${invoice.invoiceNumber}`
+      : `INVOICE:${invoice.invoiceNumber}|TOTAL:${invoice.grandTotal}|STORE:${settings.storeName}`;
+
+    const qrDataUrl = await QRCode.toDataURL(verifyPayload, {
       width: 180,
       margin: 1,
       color: { dark: '#0a0f1d', light: '#ffffff' },
@@ -339,7 +353,7 @@ export async function generateInvoicePdf(
     doc.setFont('courier', 'bold');
     doc.setFontSize(6.5);
     doc.setTextColor(71, 85, 105);
-    doc.text(`SCAN QR TO VERIFY INVOICE`, pageWidth / 2, curY, { align: 'center' });
+    doc.text(`SCAN QR TO VIEW / VERIFY INVOICE`, pageWidth / 2, curY, { align: 'center' });
     curY += 4;
   } catch {
     // ignore
@@ -353,9 +367,31 @@ export async function generateInvoicePdf(
   const footerLines = doc.splitTextToSize(footerNote, 70);
   doc.text(footerLines, pageWidth / 2, curY, { align: 'center' });
 
-  // Save PDF
-  const filename = `Invoice_${invoice.invoiceNumber}.pdf`;
-  doc.save(filename);
+  return doc;
+}
 
-  return doc.output('blob');
+/**
+ * Creates Blob and File objects for direct Web Share API or download
+ */
+export async function createInvoicePdfBlob(
+  invoice: Invoice,
+  settings: StoreSettings
+): Promise<{ doc: jsPDF; blob: Blob; file: File; filename: string }> {
+  const doc = await buildInvoicePdfDoc(invoice, settings);
+  const filename = `Invoice_${invoice.invoiceNumber}.pdf`;
+  const blob = doc.output('blob');
+  const file = new File([blob], filename, { type: 'application/pdf' });
+  return { doc, blob, file, filename };
+}
+
+/**
+ * Generates and downloads the visual thermal receipt PDF
+ */
+export async function generateInvoicePdf(
+  invoice: Invoice,
+  settings: StoreSettings
+): Promise<Blob> {
+  const { doc, blob, filename } = await createInvoicePdfBlob(invoice, settings);
+  doc.save(filename);
+  return blob;
 }

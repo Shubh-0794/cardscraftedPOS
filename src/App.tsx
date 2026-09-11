@@ -28,6 +28,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { QuickAddProductModal } from './components/QuickAddProductModal';
 import { ProductFormModal } from './components/ProductFormModal';
 import { QrCodeViewerModal, QrCodeViewerData } from './components/QrCodeViewerModal';
+import { CustomerPaymentPortal } from './components/CustomerPaymentPortal';
 import { Trash2 } from 'lucide-react';
 
 export default function App() {
@@ -88,6 +89,101 @@ export default function App() {
   const [isProductFormOpen, setIsProductFormOpen] = useState(false);
   const [productToEdit, setProductToEdit] = useState<Product | null>(null);
   const [barcodeViewerData, setBarcodeViewerData] = useState<QrCodeViewerData | null>(null);
+  const [customerPaymentData, setCustomerPaymentData] = useState<{
+    invoiceNumber: string;
+    amount: number;
+  } | null>(null);
+
+  // Listen for direct URL routing (?view_invoice=... or ?pay=...&amt=120)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const viewInv = searchParams.get('view_invoice') || searchParams.get('invoice');
+      const payInv = searchParams.get('pay');
+      const payAmtStr = searchParams.get('amt');
+      const payAmt = payAmtStr ? parseFloat(payAmtStr) : 0;
+
+      if (viewInv) {
+        // Find existing invoice or generate viewable invoice
+        const cleanInv = viewInv.trim();
+        const found = invoices.find(
+          (i) => i.invoiceNumber.toLowerCase() === cleanInv.toLowerCase() || i.id === cleanInv
+        );
+
+        if (found) {
+          setCurrentInvoice(found);
+          setIsInvoiceModalOpen(true);
+        } else {
+          // Construct visual invoice if viewed in external customer device
+          const fallbackInvoice: Invoice = {
+            id: `inv-${cleanInv}`,
+            invoiceNumber: cleanInv,
+            date: new Date().toISOString(),
+            timestamp: Date.now(),
+            cashierName: 'Online POS',
+            customer: {
+              id: 'c-customer',
+              name: 'Customer',
+              phone: '',
+              countryCode: '+91',
+              loyaltyPoints: 0,
+              totalSpent: payAmt || 120,
+              ordersCount: 1,
+            },
+            items: [
+              {
+                id: `item-${cleanInv}`,
+                product: {
+                  id: 'p-retail',
+                  name: 'Cardcrafted Goods / Gift Item',
+                  unitPrice: payAmt || 120,
+                  gstRate: 0,
+                  category: 'Gifts & Cards',
+                  stock: 50,
+                  barcode: cleanInv,
+                  sku: 'CARD-01',
+                  unit: 'pcs',
+                  hsnCode: '4819',
+                },
+                quantity: 1,
+                unitPrice: payAmt || 120,
+                discountType: 'fixed',
+                discountValue: 0,
+                taxableAmount: payAmt || 120,
+                gstAmount: 0,
+                totalAmount: payAmt || 120,
+              },
+            ],
+            subtotal: payAmt || 120,
+            itemDiscountsTotal: 0,
+            billDiscount: { type: 'percent', value: 0 },
+            billDiscountAmount: 0,
+            totalTaxable: payAmt || 120,
+            cgst: 0,
+            sgst: 0,
+            igst: 0,
+            totalTax: 0,
+            roundOff: 0,
+            grandTotal: payAmt || 120,
+            paymentMethod: 'upi',
+            paymentStatus: 'success',
+            paymentDetails: { upiRef: `UPI-${cleanInv}` },
+            whatsappDispatchStatus: 'sent',
+          };
+          setCurrentInvoice(fallbackInvoice);
+          setIsInvoiceModalOpen(true);
+        }
+      } else if (payInv) {
+        setCustomerPaymentData({
+          invoiceNumber: payInv.trim(),
+          amount: payAmt > 0 ? payAmt : 120,
+        });
+      }
+    } catch (e) {
+      console.error('Failed to parse URL query params:', e);
+    }
+  }, [invoices]);
 
   const handleOpenBarcodeViewer = useCallback(
     (barcode: string, name?: string, price?: number, sku?: string, category?: string) => {
@@ -805,6 +901,16 @@ export default function App() {
         data={barcodeViewerData}
         currencySymbol={settings.currencySymbol}
       />
+
+      {/* 10. Customer Interactive Online Payment Portal (for ?pay=INV-...&amt=120) */}
+      {customerPaymentData && (
+        <CustomerPaymentPortal
+          invoiceNumber={customerPaymentData.invoiceNumber}
+          amount={customerPaymentData.amount}
+          settings={settings}
+          onClose={() => setCustomerPaymentData(null)}
+        />
+      )}
     </div>
   );
 }
