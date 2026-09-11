@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   CartItem,
   Customer,
@@ -34,6 +34,10 @@ import {
   supabase,
   syncAllDataToSupabase,
   fetchAllDataFromSupabase,
+  syncSingleInvoiceToSupabase,
+  syncSingleProductToSupabase,
+  syncSingleCustomerToSupabase,
+  CLIENT_INSTANCE_ID,
 } from './lib/supabase';
 
 export default function App() {
@@ -70,9 +74,10 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Cloud Sync State
+  // Cloud Sync State & Loop Prevention Flags
   const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
   const [isCloudInitialized, setIsCloudInitialized] = useState<boolean>(false);
+  const isRemoteUpdateRef = useRef<boolean>(false);
 
 
   // Active Transaction State
@@ -225,6 +230,7 @@ export default function App() {
         if (!isMounted) return;
 
         if (cloudData) {
+          isRemoteUpdateRef.current = true;
           if (cloudData.products && cloudData.products.length > 0) {
             setProducts(cloudData.products);
           }
@@ -241,7 +247,7 @@ export default function App() {
             setSettings(cloudData.settings);
           }
         } else {
-          // Cloud database is initialized but empty, push current catalog/settings to Supabase
+          // Cloud database is empty or new, push current catalog/settings to Supabase
           await syncAllDataToSupabase({
             products,
             customers,
@@ -268,10 +274,16 @@ export default function App() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'app_data' },
-        async () => {
+        async (payload: any) => {
+          // Prevent echo loop if this client tab authored the write
+          if (payload?.new?.value?._client_id === CLIENT_INSTANCE_ID) {
+            return;
+          }
+
           try {
             const fresh = await fetchAllDataFromSupabase();
             if (fresh && isMounted) {
+              isRemoteUpdateRef.current = true;
               if (fresh.products) setProducts(fresh.products);
               if (fresh.customers) setCustomers(fresh.customers);
               if (fresh.invoices) setInvoices(fresh.invoices);
@@ -285,8 +297,22 @@ export default function App() {
       )
       .subscribe();
 
+    // Auto-sync when coming back online
+    const handleOnline = () => {
+      syncAllDataToSupabase({
+        products,
+        customers,
+        invoices,
+        holdCarts,
+        settings,
+      }).catch((e) => console.warn('[Supabase] Online flush note:', e));
+    };
+
+    window.addEventListener('online', handleOnline);
+
     return () => {
       isMounted = false;
+      window.removeEventListener('online', handleOnline);
       supabase.removeChannel(realtimeChannel);
     };
   }, []);
@@ -312,9 +338,15 @@ export default function App() {
     localStorage.setItem('nexus_pos_hold_carts', JSON.stringify(holdCarts));
   }, [holdCarts]);
 
-  // Continuous Cloud Sync Effect (Debounced Supabase Cloud Persistence)
+  // Continuous Cloud Sync Effect (Debounced Supabase Cloud Persistence with loop protection)
   useEffect(() => {
     if (!isCloudInitialized) return;
+
+    // If this state update was received from a remote client, skip re-pushing
+    if (isRemoteUpdateRef.current) {
+      isRemoteUpdateRef.current = false;
+      return;
+    }
 
     const timeout = setTimeout(async () => {
       try {
@@ -331,7 +363,7 @@ export default function App() {
       } finally {
         setIsCloudSyncing(false);
       }
-    }, 1500);
+    }, 1200);
 
     return () => clearTimeout(timeout);
   }, [products, settings, customers, invoices, holdCarts, isCloudInitialized]);
@@ -340,14 +372,14 @@ export default function App() {
   const handleManualSyncToCloud = useCallback(async () => {
     try {
       setIsCloudSyncing(true);
-      const success = await syncAllDataToSupabase({
+      const res = await syncAllDataToSupabase({
         products,
         customers,
         invoices,
         holdCarts,
         settings,
       });
-      return success;
+      return res.success;
     } catch (e) {
       console.error('Manual sync failed:', e);
       return false;
@@ -554,18 +586,35 @@ export default function App() {
 
   // Save new customer
   const handleSaveNewCustomer = (newCustomer: Customer) => {
+    let nextCustomers: Customer[] = [];
     setCustomers((prev) => {
       const exists = prev.some((c) => c.phone === newCustomer.phone);
       if (exists) {
-        return prev.map((c) => (c.phone === newCustomer.phone ? newCustomer : c));
+        nextCustomers = prev.map((c) => (c.phone === newCustomer.phone ? newCustomer : c));
+      } else {
+        nextCustomers = [newCustomer, ...prev];
       }
-      return [newCustomer, ...prev];
+      return nextCustomers;
     });
+    // Immediately persist to Supabase relational table and app_data snapshot
+    syncSingleCustomerToSupabase(newCustomer, nextCustomers).catch((err) =>
+      console.warn('[Supabase] Direct customer save note:', err)
+    );
   };
 
   // Delete customer
   const handleDeleteCustomer = (customerId: string) => {
-    setCustomers((prev) => prev.filter((c) => c.id !== customerId));
+    setCustomers((prev) => {
+      const filtered = prev.filter((c) => c.id !== customerId);
+      syncAllDataToSupabase({
+        products,
+        customers: filtered,
+        invoices,
+        holdCarts,
+        settings,
+      }).catch(console.warn);
+      return filtered;
+    });
     if (selectedCustomer && selectedCustomer.id === customerId) {
       setSelectedCustomer(null);
     }
@@ -573,13 +622,21 @@ export default function App() {
 
   // Save or update product in catalog & synchronize cart
   const handleSaveProduct = (savedProd: Product) => {
+    let nextProducts: Product[] = [];
     setProducts((prev) => {
       const exists = prev.some((p) => p.id === savedProd.id);
       if (exists) {
-        return prev.map((p) => (p.id === savedProd.id ? savedProd : p));
+        nextProducts = prev.map((p) => (p.id === savedProd.id ? savedProd : p));
+      } else {
+        nextProducts = [savedProd, ...prev];
       }
-      return [savedProd, ...prev];
+      return nextProducts;
     });
+
+    // Immediately persist to Supabase
+    syncSingleProductToSupabase(savedProd, nextProducts).catch((err) =>
+      console.warn('[Supabase] Direct product save note:', err)
+    );
 
     // Synchronize active cart item if this product was updated
     setCart((prevCart) =>
@@ -647,39 +704,48 @@ export default function App() {
       whatsappDispatchStatus: 'not_sent',
     };
 
-    setInvoices((prev) => [newInvoice, ...prev]);
+    const nextInvoices = [newInvoice, ...invoices];
+    setInvoices(nextInvoices);
+
+    // Immediately persist invoice directly to Supabase
+    syncSingleInvoiceToSupabase(newInvoice, nextInvoices).catch((err) =>
+      console.warn('[Supabase] Direct invoice save note:', err)
+    );
 
     // Update customer spend & loyalty
     if (selectedCustomer && selectedCustomer.id !== 'walk-in') {
       const pointsEarned = Math.floor(calculation.grandTotal / 100);
-      setCustomers((prev) =>
-        prev.map((c) => {
-          if (c.id === selectedCustomer.id) {
-            return {
-              ...c,
-              totalSpent: c.totalSpent + calculation.grandTotal,
-              ordersCount: c.ordersCount + 1,
-              loyaltyPoints: c.loyaltyPoints + pointsEarned,
-            };
-          }
-          return c;
-        })
+      const updatedCustomer: Customer = {
+        ...selectedCustomer,
+        totalSpent: selectedCustomer.totalSpent + calculation.grandTotal,
+        ordersCount: selectedCustomer.ordersCount + 1,
+        loyaltyPoints: selectedCustomer.loyaltyPoints + pointsEarned,
+      };
+
+      const nextCusts = customers.map((c) => (c.id === selectedCustomer.id ? updatedCustomer : c));
+      setCustomers(nextCusts);
+
+      syncSingleCustomerToSupabase(updatedCustomer, nextCusts).catch((err) =>
+        console.warn('[Supabase] Direct customer update note:', err)
       );
     }
 
-    // Decrement stock in catalog
-    setProducts((prev) =>
-      prev.map((p) => {
-        const cartMatch = cart.find((item) => item.product.id === p.id);
-        if (cartMatch) {
-          return {
-            ...p,
-            stock: Math.max(0, p.stock - cartMatch.quantity),
-          };
-        }
-        return p;
-      })
-    );
+    // Decrement stock in catalog and sync updated products
+    const nextProds = products.map((p) => {
+      const cartMatch = cart.find((item) => item.product.id === p.id);
+      if (cartMatch) {
+        const updatedProd: Product = {
+          ...p,
+          stock: Math.max(0, p.stock - cartMatch.quantity),
+        };
+        syncSingleProductToSupabase(updatedProd).catch((err) =>
+          console.warn('[Supabase] Direct product stock sync note:', err)
+        );
+        return updatedProd;
+      }
+      return p;
+    });
+    setProducts(nextProds);
 
     setIsPaymentModalOpen(false);
     setCurrentInvoice(newInvoice);

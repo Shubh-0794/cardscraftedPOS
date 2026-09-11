@@ -2,14 +2,25 @@
   command = "npm run build"
   publish = "dist"
 
+[build.environment]
+  NODE_VERSION = "20"
+  VITE_SUPABASE_URL = "https://iqmbsdxicfthkncfxfsb.supabase.co"
+  VITE_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_5FmGgiRqR-wXs4INhPORrQ_hTGaH5g1"
+
+# Single Page Application (SPA) fallback
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
 
+# Security and Connectivity Headers for Supabase Realtime & WebSockets
 [[headers]]
   for = "/*"
   [headers.values]
     X-Frame-Options = "ALLOWALL"
     X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer-when-downgrade"
     Permissions-Policy = "camera=(self), microphone=(), geolocation=()"
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Headers = "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+

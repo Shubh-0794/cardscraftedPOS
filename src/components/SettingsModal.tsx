@@ -1,7 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StoreSettings } from '../types/pos';
-import { Settings, Save, X, Database, CheckCircle2, RefreshCw, Copy, Check, ExternalLink } from 'lucide-react';
-import { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SQL_SCHEMA, testSupabaseConnection } from '../lib/supabase';
+import {
+  Settings,
+  Save,
+  X,
+  Database,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  Copy,
+  Check,
+  ExternalLink,
+  ShieldCheck,
+  Wrench,
+} from 'lucide-react';
+import {
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
+  SUPABASE_SQL_SCHEMA,
+  runSupabaseDiagnostics,
+  updateSupabaseCredentials,
+  SupabaseDiagnosticResult,
+} from '../lib/supabase';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -31,13 +51,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [activeTab, setActiveTab] = useState<'general' | 'supabase'>('general');
   const [formData, setFormData] = useState<StoreSettings>(settings);
   const [savedSuccess, setSavedSuccess] = useState(false);
-  const [testResult, setTestResult] = useState<{ status: 'idle' | 'testing' | 'success' | 'error'; message: string }>({
-    status: 'idle',
-    message: '',
-  });
+
+  // Supabase Custom Config Form
+  const [customUrl, setCustomUrl] = useState(SUPABASE_URL);
+  const [customKey, setCustomKey] = useState(SUPABASE_ANON_KEY);
+  const [showConfigFields, setShowConfigFields] = useState(false);
+  const [configSavedNotice, setConfigSavedNotice] = useState(false);
+
+  // Diagnostic Results
+  const [diagResult, setDiagResult] = useState<SupabaseDiagnosticResult | null>(null);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
   const [showSqlSchema, setShowSqlSchema] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'supabase' && !diagResult) {
+      handleRunDiagnostics();
+    }
+  }, [isOpen, activeTab]);
 
   if (!isOpen) return null;
 
@@ -51,14 +83,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }, 600);
   };
 
-  const handleTestConnection = async () => {
-    setTestResult({ status: 'testing', message: 'Testing Supabase connection...' });
-    const res = await testSupabaseConnection();
-    if (res.success) {
-      setTestResult({ status: 'success', message: 'Connected to Supabase project (iqmbsdxicfthkncfxfsb) successfully!' });
-    } else {
-      setTestResult({ status: 'error', message: res.message });
+  const handleRunDiagnostics = async () => {
+    setIsDiagnosing(true);
+    try {
+      const res = await runSupabaseDiagnostics();
+      setDiagResult(res);
+    } catch (e) {
+      console.error('Diagnostic error:', e);
+    } finally {
+      setIsDiagnosing(false);
     }
+  };
+
+  const handleSaveCredentials = () => {
+    updateSupabaseCredentials(customUrl, customKey);
+    setConfigSavedNotice(true);
+    setTimeout(() => setConfigSavedNotice(false), 2500);
+    handleRunDiagnostics();
   };
 
   const handleManualPush = async () => {
@@ -92,6 +133,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setCopiedSql(true);
     setTimeout(() => setCopiedSql(false), 2000);
   };
+
+  const projectId = customUrl.replace('https://', '').split('.')[0] || 'iqmbsdxicfthkncfxfsb';
+  const sqlEditorUrl = `https://supabase.com/dashboard/project/${projectId}/sql`;
 
   return (
     <div id="modal-store-settings" className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -255,9 +299,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <Database className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="font-bold text-sm text-emerald-300">Supabase Connected</h4>
+                    <h4 className="font-bold text-sm text-emerald-300">Supabase Cloud Database</h4>
                     <p className="text-[11px] text-emerald-400/80 font-mono">
-                      Project: <span className="font-bold text-emerald-200">iqmbsdxicfthkncfxfsb</span>
+                      Project: <span className="font-bold text-emerald-200">{projectId}</span>
                     </p>
                   </div>
                 </div>
@@ -284,20 +328,85 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </div>
 
-            {/* Config Details */}
-            <div className="space-y-2 bg-[#0a101d] border border-[#1b2b48] rounded-xl p-3.5">
-              <div className="flex flex-col gap-0.5">
-                <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">Supabase URL</span>
-                <span className="font-mono text-[11px] text-slate-200 select-all truncate">
-                  {SUPABASE_URL}
+            {/* Interactive Table Health Diagnostics */}
+            <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Database Tables Status</span>
                 </span>
+                <button
+                  type="button"
+                  onClick={handleRunDiagnostics}
+                  disabled={isDiagnosing}
+                  className="px-2.5 py-1 bg-[#121e38] hover:bg-[#18284c] text-slate-300 rounded-lg text-[10px] font-mono flex items-center gap-1 border border-[#1b2b48]"
+                >
+                  <RefreshCw className={`w-3 h-3 text-blue-400 ${isDiagnosing ? 'animate-spin' : ''}`} />
+                  <span>{isDiagnosing ? 'Checking...' : 'Check Status'}</span>
+                </button>
               </div>
-              <div className="flex flex-col gap-0.5 pt-1.5 border-t border-[#1b2b48]">
-                <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">Publishable API Key</span>
-                <span className="font-mono text-[11px] text-emerald-400 select-all truncate">
-                  {SUPABASE_ANON_KEY.substring(0, 16)}••••••••••••••••
-                </span>
-              </div>
+
+              {diagResult && (
+                <div className="space-y-1.5 pt-1">
+                  {diagResult.tables.map((t) => (
+                    <div
+                      key={t.table}
+                      className="flex items-center justify-between p-2 rounded-lg bg-[#070c17] border border-[#17243c]"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[11px] text-slate-200">{t.table}</span>
+                        {t.exists && t.canRead && t.canWrite ? (
+                          <span className="text-[9px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 rounded font-bold">
+                            READY
+                          </span>
+                        ) : (
+                          <span className="text-[9px] px-1.5 py-0.2 bg-rose-500/20 text-rose-300 rounded font-bold">
+                            MISSING / NEEDS SQL
+                          </span>
+                        )}
+                      </div>
+                      {t.exists && t.canRead && t.canWrite ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : (
+                        <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                      )}
+                    </div>
+                  ))}
+
+                  {!diagResult.allReady && (
+                    <div className="p-2.5 bg-amber-950/40 border border-amber-500/30 rounded-lg text-amber-200 text-[11px] space-y-2 mt-2">
+                      <div className="flex items-start gap-1.5">
+                        <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold text-amber-300">Tables not yet created in Supabase</p>
+                          <p className="text-[10px] text-amber-300/80 leading-relaxed mt-0.5">
+                            New data cannot be saved to Supabase until tables are created. Copy the SQL schema below and execute it in your Supabase SQL Editor.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={handleCopySql}
+                          className="flex-1 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold text-[10px] flex items-center justify-center gap-1 shadow"
+                        >
+                          {copiedSql ? <Check className="w-3 h-3 text-white" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedSql ? 'SQL Copied!' : 'Copy SQL Schema'}</span>
+                        </button>
+                        <a
+                          href={sqlEditorUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 py-1.5 bg-[#121e38] hover:bg-[#18284c] text-amber-200 border border-amber-500/30 rounded-lg font-bold text-[10px] flex items-center justify-center gap-1"
+                        >
+                          <span>Open Supabase SQL</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Sync Feedback Message */}
@@ -318,7 +427,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-colors flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-900/30"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                  <span>Sync to Cloud</span>
+                  <span>Sync All to Cloud</span>
                 </button>
                 <button
                   type="button"
@@ -330,29 +439,73 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <span>Pull from Cloud</span>
                 </button>
               </div>
+            </div>
 
-              <button
-                type="button"
-                onClick={handleTestConnection}
-                className="w-full py-2 bg-[#0d172e] hover:bg-[#132244] text-slate-300 border border-[#1e3357] rounded-xl font-semibold transition-colors flex items-center justify-center gap-1.5 text-[11px]"
-              >
-                <span>Test Live Supabase Connection</span>
-              </button>
-
-              {testResult.status !== 'idle' && (
-                <div
-                  className={`p-2.5 rounded-xl text-[11px] font-medium flex items-center gap-2 ${
-                    testResult.status === 'success'
-                      ? 'bg-emerald-950/60 border border-emerald-500/30 text-emerald-300'
-                      : testResult.status === 'error'
-                      ? 'bg-rose-950/60 border border-rose-500/30 text-rose-300'
-                      : 'bg-blue-950/60 border border-blue-500/30 text-blue-300'
-                  }`}
+            {/* Config Details & Key Override Accordion */}
+            <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">
+                  Connection Configuration
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowConfigFields(!showConfigFields)}
+                  className="text-[10px] text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1"
                 >
-                  {testResult.status === 'success' ? (
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  ) : null}
-                  <span>{testResult.message}</span>
+                  <Wrench className="w-3 h-3" />
+                  <span>{showConfigFields ? 'Hide Settings' : 'Edit Credentials'}</span>
+                </button>
+              </div>
+
+              {showConfigFields ? (
+                <div className="space-y-2.5 pt-2 border-t border-[#1b2b48]">
+                  <div>
+                    <label className="block text-[9px] font-mono uppercase text-slate-400">
+                      Supabase Project URL
+                    </label>
+                    <input
+                      type="text"
+                      value={customUrl}
+                      onChange={(e) => setCustomUrl(e.target.value)}
+                      placeholder="https://xxx.supabase.co"
+                      className="w-full mt-1 bg-[#070c17] border border-[#1b2b48] rounded-lg px-2.5 py-1.5 text-[11px] font-mono text-slate-200 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[9px] font-mono uppercase text-slate-400">
+                      Supabase Anon / Publishable Key
+                    </label>
+                    <input
+                      type="text"
+                      value={customKey}
+                      onChange={(e) => setCustomKey(e.target.value)}
+                      placeholder="sb_publishable_... or eyJhbGciOi..."
+                      className="w-full mt-1 bg-[#070c17] border border-[#1b2b48] rounded-lg px-2.5 py-1.5 text-[11px] font-mono text-emerald-400 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveCredentials}
+                    className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-[11px] transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{configSavedNotice ? 'Credentials Saved & Connected!' : 'Save & Reconnect'}</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-mono text-[11px] text-slate-300 truncate">
+                      {customUrl}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-0.5 pt-1 border-t border-[#17243c]">
+                    <span className="font-mono text-[10px] text-emerald-400 truncate">
+                      {customKey.substring(0, 18)}••••••••••••••••
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
@@ -365,7 +518,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   onClick={() => setShowSqlSchema(!showSqlSchema)}
                   className="text-[11px] text-blue-400 hover:text-blue-300 font-semibold underline underline-offset-2"
                 >
-                  {showSqlSchema ? 'Hide Supabase SQL Schema' : 'View / Copy SQL Tables Schema'}
+                  {showSqlSchema ? 'Hide Supabase SQL Schema' : 'View / Copy SQL Schema'}
                 </button>
                 <button
                   type="button"
