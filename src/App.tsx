@@ -27,7 +27,7 @@ import { InventoryModal } from './components/InventoryModal';
 import { SettingsModal } from './components/SettingsModal';
 import { QuickAddProductModal } from './components/QuickAddProductModal';
 import { ProductFormModal } from './components/ProductFormModal';
-import { BarcodeViewerModal, BarcodeViewerData } from './components/BarcodeViewerModal';
+import { QrCodeViewerModal, QrCodeViewerData } from './components/QrCodeViewerModal';
 import { Trash2 } from 'lucide-react';
 
 export default function App() {
@@ -87,7 +87,7 @@ export default function App() {
   const [quickAddBarcode, setQuickAddBarcode] = useState<string | null>(null);
   const [isProductFormOpen, setIsProductFormOpen] = useState(false);
   const [productToEdit, setProductToEdit] = useState<Product | null>(null);
-  const [barcodeViewerData, setBarcodeViewerData] = useState<BarcodeViewerData | null>(null);
+  const [barcodeViewerData, setBarcodeViewerData] = useState<QrCodeViewerData | null>(null);
 
   const handleOpenBarcodeViewer = useCallback(
     (barcode: string, name?: string, price?: number, sku?: string, category?: string) => {
@@ -509,7 +509,7 @@ export default function App() {
                 onDeleteCustomer={handleDeleteCustomer}
               />
 
-              {/* Barcode scanner & Product Catalog */}
+              {/* Barcode / QR scanner & Product Catalog */}
               <BarcodeScanner
                 products={products}
                 onAddToCart={(prod, qty) => {
@@ -526,6 +526,7 @@ export default function App() {
                 }}
                 onViewBarcode={handleOpenBarcodeViewer}
                 currencySymbol={settings.currencySymbol}
+                settings={settings}
               />
             </div>
           )}
@@ -742,7 +743,7 @@ export default function App() {
         }}
       />
 
-      {/* 5. Inventory & Barcode Master Modal */}
+      {/* 5. Inventory & QR Master Modal */}
       <InventoryModal
         isOpen={isInventoryModalOpen}
         onClose={() => setIsInventoryModalOpen(false)}
@@ -753,6 +754,7 @@ export default function App() {
           setCart((prev) => prev.filter((item) => item.product.id !== prodId));
         }}
         currencySymbol={settings.currencySymbol}
+        settings={settings}
         onViewBarcode={handleOpenBarcodeViewer}
       />
 
@@ -796,8 +798,8 @@ export default function App() {
         currencySymbol={settings.currencySymbol}
       />
 
-      {/* 9. HD Barcode Viewer & PNG Downloader Modal */}
-      <BarcodeViewerModal
+      {/* 9. HD QR Code Viewer & PNG Downloader Modal */}
+      <QrCodeViewerModal
         isOpen={Boolean(barcodeViewerData)}
         onClose={() => setBarcodeViewerData(null)}
         data={barcodeViewerData}

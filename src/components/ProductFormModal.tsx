@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Product } from '../types/pos';
-import { X, Sparkles, RefreshCw, Check } from 'lucide-react';
+import { X, Sparkles, RefreshCw, Check, QrCode } from 'lucide-react';
 import { posAudio } from '../utils/audio';
-import { ProductBarcodeBadge } from './ProductBarcodeBadge';
+import { ProductQrBadge } from './ProductQrBadge';
 
 interface ProductFormModalProps {
   isOpen: boolean;
@@ -108,13 +108,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               <span>{product ? 'Edit Product Details' : 'Add New Product'}</span>
             </h4>
             <p className="text-xs text-slate-400 mt-0.5">
-              {product ? 'Modify catalog item price and info' : 'Add item to instant checkout catalog'}
+              {product ? 'Modify catalog item price and QR info' : 'Add item to instant checkout catalog'}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-[#152340]"
+            className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-[#152340] cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -174,18 +174,19 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             </div>
           </div>
 
-          {/* Barcode and Category */}
+          {/* QR Code and Category */}
           <div className="grid grid-cols-2 gap-2">
             <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl px-3 pt-2 pb-1.5 focus-within:border-blue-500 transition-colors">
               <div className="flex items-center justify-between">
-                <label className="block text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono">
-                  BARCODE
+                <label className="block text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono flex items-center gap-1">
+                  <QrCode className="w-2.5 h-2.5 text-blue-400" />
+                  <span>QR CODE</span>
                 </label>
                 <button
                   type="button"
                   onClick={handleGenerateBarcode}
-                  title="Generate unique barcode"
-                  className="text-blue-400 hover:text-blue-300"
+                  title="Generate unique QR Code"
+                  className="text-blue-400 hover:text-blue-300 cursor-pointer"
                 >
                   <RefreshCw className="w-2.5 h-2.5" />
                 </button>
@@ -198,7 +199,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   onChange={(e) => setBarcode(e.target.value)}
                   className="w-full bg-transparent text-slate-100 font-mono text-xs focus:outline-none"
                 />
-                {barcode && <ProductBarcodeBadge code={barcode} width={38} height={12} />}
+                {barcode && <ProductQrBadge code={barcode} size={15} />}
               </div>
             </div>
 
@@ -221,13 +222,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-2.5 bg-[#121e38] hover:bg-[#18284c] text-slate-300 rounded-xl font-bold transition-colors"
+              className="flex-1 py-2.5 bg-[#121e38] hover:bg-[#18284c] text-slate-300 rounded-xl font-bold transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/30 transition-colors flex items-center justify-center gap-1.5"
+              className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/30 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Check className="w-4 h-4" />
               <span>{product ? 'Update Product' : 'Save Product'}</span>

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Product } from '../types/pos';
-import { Plus, X, Barcode } from 'lucide-react';
-import { ProductBarcodeBadge } from './ProductBarcodeBadge';
+import { Plus, X, QrCode } from 'lucide-react';
+import { ProductQrBadge } from './ProductQrBadge';
 
 interface QuickAddProductModalProps {
   barcode: string | null;
@@ -21,7 +21,7 @@ export const QuickAddProductModal: React.FC<QuickAddProductModalProps> = ({
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [category, setCategory] = useState('Groceries');
-  const [gstRate, setGstRate] = useState(5);
+  const [gstRate, setGstRate] = useState(0);
 
   if (!isOpen || !barcode) return null;
 
@@ -54,19 +54,19 @@ export const QuickAddProductModal: React.FC<QuickAddProductModalProps> = ({
       <div className="bg-[#0c1427] border border-[#1b2b48] rounded-3xl w-full max-w-sm shadow-2xl p-5">
         <div className="flex items-center justify-between pb-3 border-b border-[#1b2b48] mb-4">
           <div className="flex items-center gap-2">
-            <Barcode className="w-4 h-4 text-blue-400" />
-            <h4 className="font-bold text-sm text-slate-100">Unrecognized Item</h4>
+            <QrCode className="w-4 h-4 text-blue-400" />
+            <h4 className="font-bold text-sm text-slate-100">Unrecognized QR Item</h4>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-200">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-200 cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <div className="mb-3 px-3 py-2 bg-[#090f1c] border border-[#1b2b48] rounded-xl text-xs font-mono text-slate-300 flex items-center justify-between">
           <div>
-            Barcode: <span className="text-blue-400 font-bold">{barcode}</span>
+            QR Code: <span className="text-blue-400 font-bold">{barcode}</span>
           </div>
-          {barcode && <ProductBarcodeBadge code={barcode} width={42} height={14} />}
+          {barcode && <ProductQrBadge code={barcode} size={16} />}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3 text-xs">
@@ -104,13 +104,13 @@ export const QuickAddProductModal: React.FC<QuickAddProductModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-2.5 bg-[#121e38] hover:bg-[#18284c] text-slate-300 rounded-xl font-bold"
+              className="flex-1 py-2.5 bg-[#121e38] hover:bg-[#18284c] text-slate-300 rounded-xl font-bold cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/30"
+              className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-900/30 cursor-pointer"
             >
               Save &amp; Add
             </button>

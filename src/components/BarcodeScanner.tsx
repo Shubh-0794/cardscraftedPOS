@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Product } from '../types/pos';
+import { Product, StoreSettings } from '../types/pos';
 import { posAudio } from '../utils/audio';
 import { formatCurrency } from '../utils/taxCalculator';
+import { generate24QrLabelsA4Pdf } from '../utils/qrPdfGenerator';
 import {
   Plus,
   Camera,
@@ -13,9 +14,14 @@ import {
   Edit2,
   Video,
   AlertCircle,
+  QrCode,
+  FileDown,
+  Printer,
+  Sparkles,
+  Check,
 } from 'lucide-react';
 import { Html5Qrcode, CameraDevice } from 'html5-qrcode';
-import { ProductBarcodeBadge } from './ProductBarcodeBadge';
+import { ProductQrBadge } from './ProductQrBadge';
 
 interface BarcodeScannerProps {
   products: Product[];
@@ -25,6 +31,7 @@ interface BarcodeScannerProps {
   onEditProduct?: (product: Product) => void;
   onViewBarcode?: (barcode: string, name: string, price?: number, sku?: string, category?: string) => void;
   currencySymbol: string;
+  settings?: StoreSettings;
 }
 
 const AVATAR_COLORS = [
@@ -45,6 +52,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   onEditProduct,
   onViewBarcode,
   currencySymbol,
+  settings,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
@@ -56,6 +64,8 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const [lastScannedInfo, setLastScannedInfo] = useState<{ name: string; barcode: string; time: number } | null>(null);
   const [showQuickTestBarcodes, setShowQuickTestBarcodes] = useState(false);
   const [retryNonce, setRetryNonce] = useState<number>(0);
+  const [isExportingLabels, setIsExportingLabels] = useState(false);
+  const [labelsDownloaded, setLabelsDownloaded] = useState(false);
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const hardwareBufferRef = useRef<string>('');
@@ -101,14 +111,14 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         setSearchQuery('');
       } else {
         posAudio.playErrorBuzz();
-        setLastScannedInfo({ name: 'Unknown Item', barcode: cleanCode, time: Date.now() });
+        setLastScannedInfo({ name: 'New QR Code', barcode: cleanCode, time: Date.now() });
         onOpenQuickAddProduct(cleanCode);
         setSearchQuery('');
       }
     }
   };
 
-  // Hardware USB/Bluetooth Barcode Wedge Listener
+  // Hardware USB/Bluetooth QR/Barcode Scanner Wedge Listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -119,16 +129,16 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       lastKeyTimeRef.current = now;
 
       if (e.key === 'Enter') {
-        if (hardwareBufferRef.current.length >= 3 && (timeDiff < 100 || !isInput)) {
+        if (hardwareBufferRef.current.length >= 3 && timeDiff < 100) {
           e.preventDefault();
-          const scanned = hardwareBufferRef.current;
+          const scannedCode = hardwareBufferRef.current;
           hardwareBufferRef.current = '';
-          handleProcessBarcode(scanned);
+          handleProcessBarcode(scannedCode);
         } else {
           hardwareBufferRef.current = '';
         }
       } else if (e.key.length === 1) {
-        if (timeDiff > 180) {
+        if (timeDiff > 120 && !isInput) {
           hardwareBufferRef.current = e.key;
         } else {
           hardwareBufferRef.current += e.key;
@@ -140,7 +150,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [products]);
 
-  // Cleanly stop any active scanner
+  // Clean up scanner helper
   const stopCurrentScanner = async () => {
     if (scannerRef.current) {
       try {
@@ -148,105 +158,101 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           await scannerRef.current.stop();
         }
         await scannerRef.current.clear();
-      } catch (e) {
-        console.warn('Silent scanner cleanup exception:', e);
+      } catch (err) {
+        console.warn('Error clearing scanner:', err);
+      } finally {
+        scannerRef.current = null;
       }
-      scannerRef.current = null;
     }
   };
 
-  // Handle camera start/stop when isCameraActive, selectedCameraId, or retryNonce changes
+  // Camera Lifecycle
   useEffect(() => {
     let isMounted = true;
 
-    const startCamera = async () => {
-      if (!isCameraActive) {
-        await stopCurrentScanner();
-        return;
-      }
+    if (!isCameraActive) {
+      stopCurrentScanner();
+      setCameraError(null);
+      setIsInitializingCamera(false);
+      return;
+    }
 
+    const startCamera = async () => {
       setIsInitializingCamera(true);
       setCameraError(null);
 
-      // Stop any lingering scanner instance first
-      await stopCurrentScanner();
-
-      // Small pause to allow hardware/browser video tracks to fully unlock
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      if (!isMounted) return;
-
-      const viewportEl = document.getElementById('camera-reader-viewport');
-      if (!viewportEl) {
-        if (isMounted) {
-          setCameraError('Camera display element is mounting, please try again.');
-          setIsInitializingCamera(false);
-        }
-        return;
-      }
-
       try {
-        // Enumerate video devices if not already loaded
-        let cameras = availableCameras;
+        await stopCurrentScanner();
+        if (!isMounted) return;
+
+        let devices: CameraDevice[] = [];
         try {
-          const fetchedCameras = await Html5Qrcode.getCameras();
-          if (fetchedCameras && fetchedCameras.length > 0) {
-            cameras = fetchedCameras;
-            if (isMounted) {
-              setAvailableCameras(fetchedCameras);
-            }
+          devices = await Html5Qrcode.getCameras();
+          if (isMounted) {
+            setAvailableCameras(devices);
           }
-        } catch (deviceEnumError) {
-          console.warn('Could not enumerate cameras, will try direct constraints', deviceEnumError);
+        } catch (camListErr) {
+          console.warn('Could not enumerate cameras, continuing with environment fallback:', camListErr);
         }
 
-        const html5QrCode = new Html5Qrcode('camera-reader-viewport');
+        const scannerElement = document.getElementById('camera-reader');
+        if (!scannerElement) {
+          throw new Error('Camera reader container element not found.');
+        }
+
+        const html5QrCode = new Html5Qrcode('camera-reader');
         scannerRef.current = html5QrCode;
 
-        const scanConfig = {
+        const qrConfig = {
           fps: 15,
-          qrbox: { width: 250, height: 180 },
-          aspectRatio: 1.3333,
+          qrbox: { width: 250, height: 250 },
+          aspectRatio: 1.0,
         };
 
-        const onDecodeSuccess = (decodedText: string) => {
-          handleProcessBarcode(decodedText);
+        const successCallback = (decodedText: string) => {
+          if (decodedText) {
+            handleProcessBarcode(decodedText);
+          }
         };
 
         let isStarted = false;
 
-        // Strategy 1: If user explicitly selected a camera ID or devices list is populated
-        const targetCamId =
-          selectedCameraId ||
-          cameras.find((c) => /back|rear|environment/i.test(c.label))?.id ||
-          cameras[0]?.id;
-
-        if (targetCamId) {
+        if (selectedCameraId) {
           try {
-            await html5QrCode.start(targetCamId, scanConfig, onDecodeSuccess, () => {});
+            await html5QrCode.start(
+              selectedCameraId,
+              qrConfig,
+              successCallback,
+              () => {} // silent scan frame error
+            );
             isStarted = true;
-            if (isMounted && !selectedCameraId) {
-              setSelectedCameraId(targetCamId);
-            }
-          } catch (idErr: any) {
-            console.warn('Failed starting with targetCamId, falling back to facingMode:', idErr);
+          } catch (selErr) {
+            console.warn('Failed with selectedCameraId, falling back to facingMode:', selErr);
           }
         }
 
-        // Strategy 2: Fallback to environment facingMode
         if (!isStarted) {
           try {
-            await html5QrCode.start({ facingMode: 'environment' }, scanConfig, onDecodeSuccess, () => {});
+            await html5QrCode.start(
+              { facingMode: 'environment' },
+              qrConfig,
+              successCallback,
+              () => {}
+            );
             isStarted = true;
           } catch (envErr) {
-            console.warn('Environment facingMode failed, falling back to user facing camera:', envErr);
+            console.warn('Failed with facingMode environment, falling back to user camera:', envErr);
           }
         }
 
-        // Strategy 3: Fallback to user facing camera
         if (!isStarted) {
           try {
-            await html5QrCode.start({ facingMode: 'user' }, scanConfig, onDecodeSuccess, () => {});
+            await html5QrCode.start(
+              { facingMode: 'user' },
+              qrConfig,
+              successCallback,
+              () => {}
+            );
             isStarted = true;
           } catch (userErr: any) {
             console.error('All camera start attempts failed:', userErr);
@@ -264,19 +270,19 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           const errMsg = err?.message || String(err);
           if (errMsg.includes('NotReadableError') || errMsg.includes('video source')) {
             setCameraError(
-              'Camera hardware is currently busy or in use by another tab/app. Please close other camera apps, or click "Retry Camera" below.'
+              'Camera hardware is currently busy. Please close other camera tabs and click "Retry Camera".'
             );
           } else if (errMsg.includes('NotAllowedError') || errMsg.includes('Permission')) {
             setCameraError(
-              'Camera permission was not granted. Please allow camera access in your browser address bar.'
+              'Camera permission was not granted. Please allow camera access in your browser.'
             );
           } else if (errMsg.includes('NotFoundError') || errMsg.includes('DevicesNotFoundError')) {
             setCameraError(
-              'No active camera was detected on this device. You can upload barcode images or use 1-click Test Barcodes.'
+              'No active camera detected. You can upload QR code images or use 1-click Test QR Codes.'
             );
           } else {
             setCameraError(
-              'Could not start camera feed. You can retry, select another camera, or use Image Upload / Test Barcodes.'
+              'Could not start camera feed. You can retry, select another camera, or use Image Upload / Test QR Codes.'
             );
           }
         }
@@ -291,7 +297,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     };
   }, [isCameraActive, selectedCameraId, retryNonce]);
 
-  // Handle Image File Scanning
+  // Handle Image File QR Scanning
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -304,9 +310,9 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         handleProcessBarcode(result);
       }
     } catch (err: any) {
-      console.warn('Barcode not found in uploaded image:', err);
+      console.warn('QR code not found in uploaded image:', err);
       posAudio.playErrorBuzz();
-      alert('No barcode or QR code detected in the selected image. Please try another clear photo.');
+      alert('No QR code detected in the selected image. Please try another clear photo.');
     } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -341,6 +347,45 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     handleProcessBarcode(searchQuery);
   };
 
+  // Download 24 QR Labels in A4 format (Single Sheet PDF)
+  const handleDownload24QrSheet = async () => {
+    setIsExportingLabels(true);
+    try {
+      const fallbackSettings: StoreSettings = settings || {
+        storeName: 'Cardcrafted',
+        tagline: 'Retail POS',
+        gstin: '',
+        address: 'Shop #14-16, Commercial Hub',
+        city: 'Mumbai',
+        state: 'Maharashtra',
+        pincode: '400050',
+        phone: '+91 98201 54321',
+        email: 'billing@pos.com',
+        upiId: 'store@upi',
+        upiPayeeName: 'Cardcrafted POS',
+        currencySymbol,
+        currencyCode: 'INR',
+        taxType: 'none',
+        whatsappApiProvider: 'direct_wa_me',
+        invoiceFooterNote: 'Thank you for shopping!',
+        termsAndConditions: '',
+        thermalPaperWidth: '80mm',
+        enableBeepSound: true,
+        autoOpenWhatsApp: true,
+      };
+
+      await generate24QrLabelsA4Pdf(products, fallbackSettings);
+      setLabelsDownloaded(true);
+      posAudio.playSuccessChime();
+      setTimeout(() => setLabelsDownloaded(false), 3500);
+    } catch (err) {
+      console.error('Failed to generate 24 QR Label sheet PDF:', err);
+      alert('Could not generate QR PDF. Please try again.');
+    } finally {
+      setIsExportingLabels(false);
+    }
+  };
+
   return (
     <div id="product-catalog-panel" className="space-y-3.5">
       {/* Hidden container for file scanner processing */}
@@ -357,22 +402,23 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
       <form onSubmit={handleManualFormSubmit} className="space-y-2">
         <div className="relative bg-[#0a101d] border border-[#1b2b48] rounded-xl px-4 pt-2.5 pb-2 focus-within:border-blue-500 transition-colors">
           <div className="flex items-center justify-between">
-            <label className="block text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono">
-              DESCRIPTION / BARCODE SCANNER
+            <label className="block text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono flex items-center gap-1.5">
+              <QrCode className="w-3 h-3 text-blue-400" />
+              <span>SEARCH / QR CODE SCANNER</span>
             </label>
             <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => setShowQuickTestBarcodes(!showQuickTestBarcodes)}
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 transition-colors ${
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 transition-colors cursor-pointer ${
                   showQuickTestBarcodes
                     ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                     : 'text-slate-400 hover:text-amber-300 hover:bg-[#15233f]'
                 }`}
-                title="Quick Barcode Test Simulation"
+                title="Quick QR Simulation Tests"
               >
                 <Zap className="w-3 h-3" />
-                <span>Test Barcodes</span>
+                <span>Test QRs</span>
               </button>
             </div>
           </div>
@@ -382,7 +428,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
               ref={searchInputRef}
               type="text"
               id="barcode-search-input"
-              placeholder="Scan barcode, SKU or search item..."
+              placeholder="Scan QR code, SKU or search item..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full bg-transparent text-slate-100 text-sm placeholder:text-slate-500 focus:outline-none font-medium font-mono"
@@ -392,8 +438,8 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-[#15233f] transition-colors shrink-0"
-              title="Upload barcode image to scan"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-[#15233f] transition-colors shrink-0 cursor-pointer"
+              title="Upload QR Code image to scan"
             >
               <Upload className="w-4 h-4" />
             </button>
@@ -409,12 +455,12 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                   setRetryNonce((prev) => prev + 1);
                 }
               }}
-              className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors shrink-0 ${
+              className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors shrink-0 cursor-pointer ${
                 isCameraActive
                   ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse'
                   : 'bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600/30'
               }`}
-              title={isCameraActive ? 'Turn off camera scanner' : 'Turn on camera barcode scanner'}
+              title={isCameraActive ? 'Turn off camera scanner' : 'Turn on camera QR scanner'}
             >
               {isCameraActive ? <CameraOff className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
             </button>
@@ -428,7 +474,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           <div className="flex items-center justify-between text-xs text-slate-300 px-1">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-              <span className="font-bold text-emerald-400">Live Camera Barcode Scanner</span>
+              <span className="font-bold text-emerald-400">Live Camera QR Code Scanner</span>
             </div>
 
             <div className="flex items-center gap-2">
@@ -451,109 +497,92 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                   </select>
                 </div>
               )}
-
               <button
                 type="button"
-                onClick={() => setIsCameraActive(false)}
-                className="text-slate-400 hover:text-slate-200 text-xs font-mono"
+                onClick={() => setRetryNonce((prev) => prev + 1)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-[#15233f] transition-colors"
+                title="Restart camera stream"
               >
-                Close Camera [✕]
+                <RefreshCw className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
 
-          <div className="relative w-full max-w-sm mx-auto overflow-hidden rounded-xl bg-black min-h-[190px] border border-[#1b2b48]">
-            <div id="camera-reader-viewport" className="w-full h-full min-h-[190px]" />
+          {/* Camera Viewfinder Box */}
+          <div className="relative w-full aspect-4/3 max-h-56 bg-black rounded-xl overflow-hidden border border-[#1b2b48] flex items-center justify-center">
+            <div id="camera-reader" className="w-full h-full object-cover" />
 
-            {/* Animated Laser Reticle */}
-            {!cameraError && !isInitializingCamera && (
-              <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
-                <div className="w-48 h-32 border-2 border-dashed border-blue-400/60 rounded-xl relative">
-                  <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-blue-400" />
-                  <div className="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-blue-400" />
-                  <div className="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-blue-400" />
-                  <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-blue-400" />
-                  <div className="w-full h-0.5 bg-rose-500 shadow-md shadow-rose-500 animate-bounce absolute top-1/2 -translate-y-1/2" />
-                </div>
-                <p className="text-[10px] text-white/80 bg-black/60 px-2 py-0.5 rounded-full mt-2 font-mono">
-                  Align Barcode or QR Code Inside Box
-                </p>
+            {/* Target Reticle Overlay */}
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+              <div className="w-36 h-36 border-2 border-blue-400/80 rounded-2xl relative shadow-lg">
+                <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-emerald-400 -mt-1 -ml-1" />
+                <div className="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-emerald-400 -mt-1 -mr-1" />
+                <div className="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-emerald-400 -mb-1 -ml-1" />
+                <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-emerald-400 -mb-1 -mr-1" />
+                {/* Center scan beam */}
+                <div className="absolute inset-x-2 h-0.5 bg-linear-to-r from-transparent via-emerald-400 to-transparent animate-pulse top-1/2 -translate-y-1/2" />
               </div>
-            )}
+            </div>
 
             {isInitializingCamera && (
-              <div className="absolute inset-0 bg-black/80 flex items-center justify-center gap-2 text-xs text-blue-300">
-                <RefreshCw className="w-4 h-4 animate-spin text-blue-400" />
-                <span>Starting camera...</span>
+              <div className="absolute inset-0 bg-black/75 flex flex-col items-center justify-center gap-2 text-xs text-blue-400 font-mono">
+                <RefreshCw className="w-6 h-6 animate-spin" />
+                <span>Starting QR Camera Lens...</span>
               </div>
             )}
           </div>
 
           {cameraError && (
-            <div className="p-3 bg-rose-950/60 border border-rose-500/40 rounded-xl text-xs text-rose-200 space-y-2">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                <p className="font-medium">{cameraError}</p>
-              </div>
-
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setRetryNonce((prev) => prev + 1)}
-                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                  <span>Retry Camera</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-2.5 py-1 bg-[#182848] hover:bg-[#203662] text-slate-200 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors"
-                >
-                  <Upload className="w-3 h-3" />
-                  <span>Upload Photo</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowQuickTestBarcodes(true)}
-                  className="px-2.5 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors"
-                >
-                  <Zap className="w-3 h-3" />
-                  <span>Test Barcodes</span>
-                </button>
+            <div className="p-2.5 bg-rose-950/40 border border-rose-500/40 rounded-xl text-rose-300 text-xs flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p>{cameraError}</p>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setRetryNonce((prev) => prev + 1)}
+                    className="px-2.5 py-1 bg-rose-800/60 hover:bg-rose-700/80 rounded-lg text-[11px] font-bold text-white transition-colors"
+                  >
+                    Retry Camera
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-2.5 py-1 bg-[#142342] hover:bg-[#1e3463] rounded-lg text-[11px] font-bold text-slate-200 transition-colors"
+                  >
+                    Upload QR Image
+                  </button>
+                </div>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* Quick Test Barcode Drawer / Chips */}
+      {/* Quick Test QR Badges (Expandable Panel) */}
       {showQuickTestBarcodes && (
-        <div className="p-3 bg-[#081020] border border-amber-500/30 rounded-2xl space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5 font-mono">
-              <Zap className="w-3.5 h-3.5 text-amber-400" />
-              1-CLICK TEST BARCODE SCANS
+        <div className="p-3 bg-[#0a101d] border border-amber-500/30 rounded-2xl shadow-lg space-y-2">
+          <div className="flex items-center justify-between text-xs text-amber-300">
+            <span className="font-bold flex items-center gap-1.5">
+              <Zap className="w-3.5 h-3.5" /> 1-Click Simulation QRs
             </span>
-            <span className="text-[10px] text-slate-400">Click any barcode to test auto-add</span>
+            <span className="text-[10px] text-slate-400">Click any card to simulate scan</span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {products.slice(0, 6).map((item) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => handleProcessBarcode(item.barcode)}
-                className="p-2 bg-[#0e1a33] hover:bg-[#172b54] border border-[#1b2e54] hover:border-amber-400/50 rounded-xl text-left transition-all group"
+                className="p-2 bg-[#0d1629] hover:bg-[#142240] border border-[#1b2b48] hover:border-amber-500/50 rounded-xl text-left transition-all group flex flex-col justify-between cursor-pointer"
               >
                 <div className="text-[11px] font-bold text-slate-200 truncate group-hover:text-amber-300">
                   {item.name}
                 </div>
-                <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between mt-0.5">
-                  <span className="text-amber-400/90">{item.barcode}</span>
-                  <span className="font-bold text-slate-300">{formatCurrency(item.unitPrice, currencySymbol)}</span>
+                <div className="flex items-center justify-between mt-1 text-[10px] font-mono text-slate-400">
+                  <span className="text-amber-400 font-bold">{formatCurrency(item.unitPrice, currencySymbol)}</span>
+                  <ProductQrBadge code={item.barcode} size={14} />
                 </div>
               </button>
             ))}
@@ -561,28 +590,29 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         </div>
       )}
 
-      {/* Scanned Feedback Notification Banner */}
-      {lastScannedInfo && (
-        <div className="px-3 py-2 bg-blue-950/60 border border-blue-500/30 rounded-xl flex items-center justify-between text-xs animate-fadeIn">
-          <div className="flex items-center gap-2 text-blue-200">
-            <CheckCircle2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-            <span className="font-mono text-[11px] text-slate-300">Scanned [{lastScannedInfo.barcode}]:</span>
-            <span className="font-bold text-white truncate max-w-[170px]">{lastScannedInfo.name}</span>
+      {/* Last Scanned Feedback Pill */}
+      {lastScannedInfo && Date.now() - lastScannedInfo.time < 4000 && (
+        <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/40 rounded-xl text-emerald-300 text-xs flex items-center justify-between animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            <span>
+              Scanned: <strong>{lastScannedInfo.name}</strong> ({lastScannedInfo.barcode})
+            </span>
           </div>
-          <span className="text-[10px] text-emerald-400 font-bold uppercase font-mono">+ Added</span>
+          <span className="text-[10px] font-mono text-emerald-400/80">Added to cart</span>
         </div>
       )}
 
       {/* Category Pills */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
         {categories.map((cat) => (
           <button
             key={cat}
             type="button"
             onClick={() => setSelectedCategory(cat)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer ${
               selectedCategory === cat
-                ? 'bg-blue-600 text-white'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40'
                 : 'bg-[#0a101d] border border-[#1b2b48] text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -606,7 +636,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           <button
             type="button"
             onClick={onOpenAddProduct}
-            className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-md shadow-blue-900/30 transition-colors"
+            className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-md shadow-blue-900/30 transition-colors cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Add Product</span>
@@ -648,17 +678,16 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                           onViewBarcode?.(product.barcode, product.name, product.unitPrice, product.sku, product.category);
                         }}
                         className="text-slate-300 font-mono hover:text-blue-400 hover:underline transition-colors cursor-pointer"
-                        title="Click to view & download large barcode"
+                        title="Click to view & download large QR Code"
                       >
-                        {product.barcode}
+                        QR: {product.barcode}
                       </button>
                       <span>•</span>
                       <span className="inline-flex items-center gap-1.5">
                         <span>{product.stock} in stock</span>
-                        <ProductBarcodeBadge
+                        <ProductQrBadge
                           code={product.barcode}
-                          width={42}
-                          height={13}
+                          size={15}
                           clickable={true}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -682,7 +711,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                         onEditProduct(product);
                       }}
                       title="Edit Product"
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-[#152445] transition-colors"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-[#152445] transition-colors cursor-pointer"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
@@ -702,7 +731,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                 <button
                   type="button"
                   onClick={onOpenAddProduct}
-                  className="px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-500 transition-colors inline-flex items-center gap-1.5"
+                  className="px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-500 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" /> Add New Product
                 </button>
@@ -710,6 +739,50 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
             </div>
           </div>
         )}
+      </div>
+
+      {/* Button Under Product: Download 24 QR Labels with Product Name in A4 Size PDF */}
+      <div className="pt-2 border-t border-[#1b2b48]">
+        <button
+          type="button"
+          onClick={handleDownload24QrSheet}
+          disabled={isExportingLabels || products.length === 0}
+          className="w-full py-2.5 px-3.5 bg-linear-to-r from-blue-900/40 via-[#132342] to-blue-900/40 hover:from-blue-800/60 hover:to-blue-800/60 border border-blue-500/40 hover:border-blue-400 text-slate-100 rounded-2xl text-xs font-bold flex items-center justify-between transition-all shadow-md group cursor-pointer"
+          title="Download printable A4 sheet with 24 QR labels & product names"
+        >
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
+              <QrCode className="w-4 h-4" />
+            </div>
+            <div className="text-left">
+              <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                <span>Download 24 QR Labels (A4 PDF)</span>
+                <span className="px-1.5 py-0.2 bg-blue-500/20 text-blue-300 text-[10px] font-mono rounded border border-blue-400/30">
+                  A4 24-Up
+                </span>
+              </div>
+              <div className="text-[10px] text-slate-400 font-normal">
+                Includes QR, product name, price & SKU ready to print
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 text-blue-400 group-hover:text-blue-300 font-mono text-xs">
+            {labelsDownloaded ? (
+              <span className="inline-flex items-center gap-1 text-emerald-400 font-bold">
+                <Check className="w-3.5 h-3.5" /> Done!
+              </span>
+            ) : isExportingLabels ? (
+              <span className="inline-flex items-center gap-1">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating...
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 font-bold">
+                <FileDown className="w-4 h-4" /> Download PDF
+              </span>
+            )}
+          </div>
+        </button>
       </div>
     </div>
   );
