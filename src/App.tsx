@@ -37,6 +37,8 @@ import {
   syncSingleInvoiceToSupabase,
   syncSingleProductToSupabase,
   syncSingleCustomerToSupabase,
+  deleteCustomerFromSupabase,
+  deleteProductFromSupabase,
   CLIENT_INSTANCE_ID,
 } from './lib/supabase';
 
@@ -588,9 +590,9 @@ export default function App() {
   const handleSaveNewCustomer = (newCustomer: Customer) => {
     let nextCustomers: Customer[] = [];
     setCustomers((prev) => {
-      const exists = prev.some((c) => c.phone === newCustomer.phone);
+      const exists = prev.some((c) => c.phone === newCustomer.phone || c.id === newCustomer.id);
       if (exists) {
-        nextCustomers = prev.map((c) => (c.phone === newCustomer.phone ? newCustomer : c));
+        nextCustomers = prev.map((c) => (c.phone === newCustomer.phone || c.id === newCustomer.id ? newCustomer : c));
       } else {
         nextCustomers = [newCustomer, ...prev];
       }
@@ -602,22 +604,56 @@ export default function App() {
     );
   };
 
-  // Delete customer
-  const handleDeleteCustomer = (customerId: string) => {
+  // Update existing customer details
+  const handleUpdateCustomer = (updatedCustomer: Customer) => {
+    let nextCustomers: Customer[] = [];
     setCustomers((prev) => {
-      const filtered = prev.filter((c) => c.id !== customerId);
-      syncAllDataToSupabase({
-        products,
-        customers: filtered,
-        invoices,
-        holdCarts,
-        settings,
-      }).catch(console.warn);
-      return filtered;
+      nextCustomers = prev.map((c) => (c.id === updatedCustomer.id ? updatedCustomer : c));
+      return nextCustomers;
     });
+
+    if (selectedCustomer && selectedCustomer.id === updatedCustomer.id) {
+      setSelectedCustomer(updatedCustomer);
+    }
+
+    // Immediately persist to Supabase relational table and app_data snapshot
+    syncSingleCustomerToSupabase(updatedCustomer, nextCustomers).catch((err) =>
+      console.warn('[Supabase] Direct customer update note:', err)
+    );
+  };
+
+  // Delete customer from state and Supabase DB
+  const handleDeleteCustomer = (customerId: string) => {
+    let nextCustomers: Customer[] = [];
+    setCustomers((prev) => {
+      nextCustomers = prev.filter((c) => c.id !== customerId);
+      return nextCustomers;
+    });
+
     if (selectedCustomer && selectedCustomer.id === customerId) {
       setSelectedCustomer(null);
     }
+
+    // Call dedicated Supabase delete function
+    deleteCustomerFromSupabase(customerId, nextCustomers).catch((err) =>
+      console.warn('[Supabase] Direct customer delete note:', err)
+    );
+  };
+
+  // Delete product from state, cart and Supabase DB
+  const handleDeleteProduct = (productId: string) => {
+    let nextProducts: Product[] = [];
+    setProducts((prev) => {
+      nextProducts = prev.filter((p) => p.id !== productId);
+      return nextProducts;
+    });
+
+    setCart((prev) => prev.filter((item) => item.product.id !== productId));
+
+    // Call dedicated Supabase delete function
+    deleteProductFromSupabase(productId, nextProducts).catch((err) =>
+      console.warn('[Supabase] Direct product delete note:', err)
+    );
   };
 
   // Save or update product in catalog & synchronize cart
@@ -824,6 +860,7 @@ export default function App() {
                 onSelectCustomer={setSelectedCustomer}
                 customersList={customers}
                 onSaveNewCustomer={handleSaveNewCustomer}
+                onUpdateCustomer={handleUpdateCustomer}
                 onDeleteCustomer={handleDeleteCustomer}
               />
 
@@ -1067,10 +1104,7 @@ export default function App() {
         onClose={() => setIsInventoryModalOpen(false)}
         products={products}
         onSaveProduct={handleSaveProduct}
-        onDeleteProduct={(prodId) => {
-          setProducts((prev) => prev.filter((p) => p.id !== prodId));
-          setCart((prev) => prev.filter((item) => item.product.id !== prodId));
-        }}
+        onDeleteProduct={handleDeleteProduct}
         currencySymbol={settings.currencySymbol}
         settings={settings}
         onViewBarcode={handleOpenBarcodeViewer}

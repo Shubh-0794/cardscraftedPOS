@@ -373,6 +373,69 @@ export async function syncSingleCustomerToSupabase(c: Customer, fullCustomersLis
 }
 
 /**
+ * Directly delete a customer from Supabase (relational table and snapshot store)
+ */
+export async function deleteCustomerFromSupabase(customerId: string, remainingCustomers?: Customer[]): Promise<boolean> {
+  try {
+    // 1. Delete from dedicated relational table
+    const { error: relError } = await supabase.from('customers').delete().eq('id', customerId);
+    if (relError) {
+      console.warn('[Supabase] Note on deleting customer from table:', relError.message);
+    }
+
+    // 2. Also update app_data snapshot store immediately
+    if (remainingCustomers) {
+      await saveAppDataToSupabase('customers', remainingCustomers);
+    }
+    return true;
+  } catch (e) {
+    console.error('[Supabase] Error deleting customer:', e);
+    return false;
+  }
+}
+
+/**
+ * Directly delete a product from Supabase (relational table and snapshot store)
+ */
+export async function deleteProductFromSupabase(productId: string, remainingProducts?: Product[]): Promise<boolean> {
+  try {
+    // 1. Delete from dedicated relational table
+    const { error: relError } = await supabase.from('products').delete().eq('id', productId);
+    if (relError) {
+      console.warn('[Supabase] Note on deleting product from table:', relError.message);
+    }
+
+    // 2. Also update app_data snapshot store immediately
+    if (remainingProducts) {
+      await saveAppDataToSupabase('products', remainingProducts);
+    }
+    return true;
+  } catch (e) {
+    console.error('[Supabase] Error deleting product:', e);
+    return false;
+  }
+}
+
+/**
+ * Directly delete an invoice from Supabase
+ */
+export async function deleteInvoiceFromSupabase(invoiceId: string, remainingInvoices?: Invoice[]): Promise<boolean> {
+  try {
+    const { error: relError } = await supabase.from('invoices').delete().eq('id', invoiceId);
+    if (relError) {
+      console.warn('[Supabase] Note on deleting invoice from table:', relError.message);
+    }
+    if (remainingInvoices) {
+      await saveAppDataToSupabase('invoices', remainingInvoices);
+    }
+    return true;
+  } catch (e) {
+    console.error('[Supabase] Error deleting invoice:', e);
+    return false;
+  }
+}
+
+/**
  * Save complete application snapshot to Supabase
  */
 export async function syncAllDataToSupabase(payload: {
@@ -593,23 +656,43 @@ export async function fetchAllDataFromSupabase(): Promise<{
       // ignore
     }
 
-    // 3. Reconcile Products (merge relational and snapshot, deduplicated by id)
-    const productMap = new Map<string, Product>();
-    (snapshotProducts || []).forEach((p) => productMap.set(p.id, p));
-    relProducts.forEach((p) => productMap.set(p.id, p));
-    const mergedProducts = Array.from(productMap.values());
+    // 3. Reconcile Products (authoritative relational table when available, fallback to snapshot)
+    let mergedProducts: Product[] = [];
+    if (relProducts.length > 0) {
+      const snapMap = new Map((snapshotProducts || []).map((p) => [p.id, p]));
+      mergedProducts = relProducts.map((rp) => {
+        const snap = snapMap.get(rp.id);
+        return snap ? { ...snap, ...rp } : rp;
+      });
+    } else if (snapshotProducts && snapshotProducts.length > 0) {
+      mergedProducts = snapshotProducts;
+    }
 
-    // 4. Reconcile Customers (deduplicated by id)
-    const customerMap = new Map<string, Customer>();
-    (snapshotCustomers || []).forEach((c) => customerMap.set(c.id, c));
-    relCustomers.forEach((c) => customerMap.set(c.id, c));
-    const mergedCustomers = Array.from(customerMap.values());
+    // 4. Reconcile Customers (authoritative relational table when available, fallback to snapshot)
+    let mergedCustomers: Customer[] = [];
+    if (relCustomers.length > 0) {
+      const snapMap = new Map((snapshotCustomers || []).map((c) => [c.id, c]));
+      mergedCustomers = relCustomers.map((rc) => {
+        const snap = snapMap.get(rc.id);
+        return snap ? { ...snap, ...rc } : rc;
+      });
+    } else if (snapshotCustomers && snapshotCustomers.length > 0) {
+      mergedCustomers = snapshotCustomers;
+    }
 
-    // 5. Reconcile Invoices (deduplicated by id, sorted newest first)
-    const invoiceMap = new Map<string, Invoice>();
-    (snapshotInvoices || []).forEach((inv) => invoiceMap.set(inv.id, inv));
-    relInvoices.forEach((inv) => invoiceMap.set(inv.id, inv));
-    const mergedInvoices = Array.from(invoiceMap.values()).sort((a, b) => b.timestamp - a.timestamp);
+    // 5. Reconcile Invoices (authoritative relational table when available, fallback to snapshot)
+    let mergedInvoices: Invoice[] = [];
+    if (relInvoices.length > 0) {
+      const snapMap = new Map((snapshotInvoices || []).map((i) => [i.id, i]));
+      mergedInvoices = relInvoices
+        .map((ri) => {
+          const snap = snapMap.get(ri.id);
+          return snap ? { ...snap, ...ri } : ri;
+        })
+        .sort((a, b) => b.timestamp - a.timestamp);
+    } else if (snapshotInvoices && snapshotInvoices.length > 0) {
+      mergedInvoices = snapshotInvoices.sort((a, b) => b.timestamp - a.timestamp);
+    }
 
     const hasAnyData =
       mergedProducts.length > 0 ||

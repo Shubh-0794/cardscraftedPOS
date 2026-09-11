@@ -661,9 +661,18 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                 className="bg-[#0b1325] hover:bg-[#101b33] border border-[#1a2b47] hover:border-blue-500/50 rounded-2xl p-3 flex items-center justify-between cursor-pointer transition-all shadow-xs group"
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className={`w-8 h-8 rounded-full ${avatarColor} flex items-center justify-center font-bold text-xs shrink-0 font-mono shadow-xs`}>
-                    {initial}
-                  </div>
+                  {product.image ? (
+                    <img
+                      src={product.image}
+                      alt={product.name}
+                      referrerPolicy="no-referrer"
+                      className="w-10 h-10 rounded-xl object-cover border border-[#1b2b48] shrink-0 bg-[#15233f] shadow-xs"
+                    />
+                  ) : (
+                    <div className={`w-10 h-10 rounded-xl ${avatarColor} flex items-center justify-center font-bold text-xs shrink-0 font-mono shadow-xs`}>
+                      {initial}
+                    </div>
+                  )}
                   <div className="min-w-0">
                     <h4 className="font-bold text-xs text-slate-100 truncate group-hover:text-blue-400 transition-colors">
                       {product.name}

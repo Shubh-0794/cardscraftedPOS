@@ -174,37 +174,29 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
               key={product.id}
               className="bg-[#0b1325] border border-[#1a2b47] rounded-2xl p-3 flex items-center justify-between gap-3 hover:border-blue-500/40 transition-colors"
             >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h4 className="font-bold text-xs text-slate-100 truncate">{product.name}</h4>
-                  <span className="text-[10px] font-mono text-slate-400 bg-[#121e38] px-1.5 py-0.5 rounded-md">
-                    {product.category}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2.5 text-[11px] text-slate-400 font-mono mt-0.5 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onViewBarcode?.(
-                        product.barcode,
-                        product.name,
-                        product.unitPrice,
-                        product.sku,
-                        product.category
-                      )
-                    }
-                    className="text-slate-300 font-mono hover:text-blue-400 hover:underline transition-colors cursor-pointer"
-                    title="Click to view & download large QR Code"
-                  >
-                    QR: {product.barcode}
-                  </button>
-                  <span>•</span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span>Stock: {product.stock}</span>
-                    <ProductQrBadge
-                      code={product.barcode}
-                      size={15}
-                      clickable={true}
+              <div className="flex items-center gap-3 min-w-0">
+                {product.image ? (
+                  <img
+                    src={product.image}
+                    alt={product.name}
+                    referrerPolicy="no-referrer"
+                    className="w-10 h-10 rounded-xl object-cover border border-[#1b2b48] shrink-0 bg-[#15233f] shadow-xs"
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded-xl bg-[#13223f] border border-[#1b2b48] text-blue-400 font-bold text-xs flex items-center justify-center shrink-0 font-mono shadow-xs">
+                    {product.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-bold text-xs text-slate-100 truncate">{product.name}</h4>
+                    <span className="text-[10px] font-mono text-slate-400 bg-[#121e38] px-1.5 py-0.5 rounded-md">
+                      {product.category}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2.5 text-[11px] text-slate-400 font-mono mt-0.5 flex-wrap">
+                    <button
+                      type="button"
                       onClick={() =>
                         onViewBarcode?.(
                           product.barcode,
@@ -214,8 +206,30 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
                           product.category
                         )
                       }
-                    />
-                  </span>
+                      className="text-slate-300 font-mono hover:text-blue-400 hover:underline transition-colors cursor-pointer"
+                      title="Click to view & download large QR Code"
+                    >
+                      QR: {product.barcode}
+                    </button>
+                    <span>•</span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span>Stock: {product.stock}</span>
+                      <ProductQrBadge
+                        code={product.barcode}
+                        size={15}
+                        clickable={true}
+                        onClick={() =>
+                          onViewBarcode?.(
+                            product.barcode,
+                            product.name,
+                            product.unitPrice,
+                            product.sku,
+                            product.category
+                          )
+                        }
+                      />
+                    </span>
+                  </div>
                 </div>
               </div>
 

@@ -92,6 +92,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     hsnCode: '0901',
     stock: 45,
     unit: 'jar',
+    image: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=400&q=80',
   },
   {
     id: 'prod-2',
@@ -105,6 +106,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     hsnCode: '1905',
     stock: 120,
     unit: 'pkt',
+    image: 'https://images.unsplash.com/photo-1566478989037-eec170784d0b?auto=format&fit=crop&w=400&q=80',
   },
   {
     id: 'prod-3',
@@ -118,6 +120,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     hsnCode: '0405',
     stock: 28,
     unit: 'box',
+    image: 'https://images.unsplash.com/photo-1589985270826-4b7bb135bc9d?auto=format&fit=crop&w=400&q=80',
   },
   {
     id: 'prod-4',
@@ -131,6 +134,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     hsnCode: '1512',
     stock: 60,
     unit: 'pouch',
+    image: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?auto=format&fit=crop&w=400&q=80',
   },
   {
     id: 'prod-5',
@@ -144,6 +148,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     hsnCode: '1006',
     stock: 35,
     unit: 'bag',
+    image: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=400&q=80',
   },
   {
     id: 'prod-6',
@@ -157,6 +162,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     hsnCode: '3401',
     stock: 22,
     unit: 'bottle',
+    image: 'https://images.unsplash.com/photo-1608248597359-25f0a4f5f5c0?auto=format&fit=crop&w=400&q=80',
   },
   {
     id: 'prod-7',
@@ -170,6 +176,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     hsnCode: '2202',
     stock: 80,
     unit: 'can',
+    image: 'https://images.unsplash.com/photo-1622543925917-763c34d1a86e?auto=format&fit=crop&w=400&q=80',
   },
   {
     id: 'prod-8',
@@ -183,6 +190,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     hsnCode: '8544',
     stock: 40,
     unit: 'pcs',
+    image: 'https://images.unsplash.com/photo-1544652478-6653e09f18a2?auto=format&fit=crop&w=400&q=80',
   },
   {
     id: 'prod-9',
@@ -196,6 +204,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     hsnCode: '1806',
     stock: 50,
     unit: 'bar',
+    image: 'https://images.unsplash.com/photo-1549007994-cb92caebd54b?auto=format&fit=crop&w=400&q=80',
   },
   {
     id: 'prod-10',
@@ -209,6 +218,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     hsnCode: '3402',
     stock: 30,
     unit: 'bottle',
+    image: 'https://images.unsplash.com/photo-1585670210693-e7fdd16b142e?auto=format&fit=crop&w=400&q=80',
   },
   {
     id: 'prod-11',
@@ -222,6 +232,7 @@ export const INITIAL_PRODUCTS: Product[] = [
     hsnCode: '1905',
     stock: 25,
     unit: 'pkt',
+    image: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=400&q=80',
   },
   {
     id: 'prod-12',
@@ -235,5 +246,6 @@ export const INITIAL_PRODUCTS: Product[] = [
     hsnCode: '0902',
     stock: 42,
     unit: 'pouch',
+    image: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=400&q=80',
   },
 ];

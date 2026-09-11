@@ -23,16 +23,16 @@ export function getAppBaseUrl(): string {
 
 /**
  * Builds a beautifully structured WhatsApp message for retail customers
+ * Note: E-bill link removed as requested, providing clean itemized invoice with PDF reference
  */
 export function buildWhatsAppInvoiceMessage(invoice: Invoice, settings: StoreSettings): string {
   const symbol = settings.currencySymbol || '₹';
   const cleanPhone = invoice.customer.phone.replace(/\D/g, '');
-  const baseUrl = getAppBaseUrl();
 
   const paymentMethodLabel = {
     upi: '⚡ UPI / QR',
     cash: '💵 Cash Counter',
-    whatsapp: '💬 WhatsApp Payment Link',
+    whatsapp: '💬 WhatsApp Payment',
     split: '🔄 Split Payment',
   }[invoice.paymentMethod] || 'Digital Payment';
 
@@ -50,22 +50,9 @@ export function buildWhatsAppInvoiceMessage(invoice: Invoice, settings: StoreSet
         item.discountValue > 0
           ? ` _(Saved ${item.discountType === 'percent' ? `${item.discountValue}%` : formatCurrency(item.discountValue, symbol)})_`
           : '';
-      return `${index + 1}. *${item.product.name}*\n   Qty: ${item.quantity} ${item.product.unit} × ${formatCurrency(item.unitPrice, symbol)} = *${formatCurrency(item.totalAmount, symbol)}*${discText}`;
+      return `${index + 1}. *${item.product.name}*\n   Qty: ${item.quantity} ${item.product.unit || 'pcs'} × ${formatCurrency(item.unitPrice, symbol)} = *${formatCurrency(item.totalAmount, symbol)}*${discText}`;
     })
     .join('\n');
-
-  // Exact UPI Payment Deep Link for the exact total (e.g. ₹120.00)
-  const upiUri = buildUPIDeepLink({
-    upiId: settings.upiId,
-    payeeName: settings.upiPayeeName || settings.storeName,
-    amount: invoice.grandTotal,
-    currency: settings.currencyCode || 'INR',
-    transactionNote: `Invoice #${invoice.invoiceNumber}`,
-    transactionRef: invoice.invoiceNumber,
-  });
-
-  const onlinePaymentLink = `${baseUrl}/?pay=${encodeURIComponent(invoice.invoiceNumber)}&amt=${invoice.grandTotal}`;
-  const digitalInvoiceLink = `${baseUrl}/?view_invoice=${encodeURIComponent(invoice.invoiceNumber)}`;
 
   let message = `🧾 *TAX INVOICE - ${settings.storeName.toUpperCase()}*\n`;
   message += `━━━━━━━━━━━━━━━━━━━━━\n`;
@@ -109,15 +96,9 @@ export function buildWhatsAppInvoiceMessage(invoice: Invoice, settings: StoreSet
   message += `💳 *Payment Method:* ${paymentMethodLabel}\n`;
   message += `📌 *Payment Status:* ${paymentStatusLabel}\n\n`;
 
-  // If unpaid or WhatsApp payment, provide direct one-tap payment link for the EXACT amount
-  if (invoice.paymentStatus === 'pending' || invoice.paymentMethod === 'whatsapp') {
-    message += `⚡ *Pay ${formatCurrency(invoice.grandTotal, symbol)} via Online Payment Link:*\n${onlinePaymentLink}\n\n`;
-    message += `📲 *Pay ${formatCurrency(invoice.grandTotal, symbol)} via UPI (GPay/PhonePe/Paytm):*\n${upiUri}\n\n`;
-    message += `🏦 *UPI ID:* \`${settings.upiId}\`\n\n`;
-  }
-
-  message += `📄 *View & Download Digital PDF Invoice:*\n${digitalInvoiceLink}\n\n`;
-  message += `✨ _${settings.invoiceFooterNote || 'Thank you for shopping with us!'}_`;
+  // Note: E-bill link removed per request. Reference to attached official PDF bill
+  message += `📎 *Official PDF Tax Invoice attached.*\n\n`;
+  message += `✨ _${settings.invoiceFooterNote || 'Thank you for shopping with us! Visit again.'}_`;
 
   return message;
 }
@@ -125,18 +106,26 @@ export function buildWhatsAppInvoiceMessage(invoice: Invoice, settings: StoreSet
 /**
  * Builds all integration payloads (Direct wa.me link, Meta WhatsApp Cloud API JSON, Twilio API JSON)
  */
-export function generateWhatsAppPayloads(invoice: Invoice, settings: StoreSettings): WhatsAppMessagePayloads {
+export function generateWhatsAppPayloads(
+  invoice: Invoice,
+  settings: StoreSettings,
+  overridePhone?: string,
+  overrideCountryCode?: string
+): WhatsAppMessagePayloads {
   const plainTextMessage = buildWhatsAppInvoiceMessage(invoice, settings);
   const baseUrl = getAppBaseUrl();
   const onlinePaymentLink = `${baseUrl}/?pay=${encodeURIComponent(invoice.invoiceNumber)}&amt=${invoice.grandTotal}`;
   const digitalInvoiceLink = `${baseUrl}/?view_invoice=${encodeURIComponent(invoice.invoiceNumber)}`;
 
-  // Phone number normalization
-  const cleanCountryCode = invoice.customer.countryCode.replace(/\D/g, '') || '91';
-  const cleanPhone = invoice.customer.phone.replace(/\D/g, '');
-  const fullRecipientNumber = `${cleanCountryCode}${cleanPhone}`;
+  // Phone number normalization strictly targeting customer
+  const targetCountry = overrideCountryCode || invoice.customer.countryCode || '+91';
+  const targetPhoneNum = overridePhone !== undefined ? overridePhone : invoice.customer.phone;
 
-  // 1. Direct Web WhatsApp link
+  const cleanCountryCode = targetCountry.replace(/\D/g, '') || '91';
+  const cleanPhone = (targetPhoneNum || '').replace(/\D/g, '');
+  const fullRecipientNumber = cleanPhone ? `${cleanCountryCode}${cleanPhone}` : '';
+
+  // 1. Direct Web WhatsApp link strictly to customer's WhatsApp chat
   const encodedText = encodeURIComponent(plainTextMessage);
   const waMeLink = fullRecipientNumber
     ? `https://wa.me/${fullRecipientNumber}?text=${encodedText}`
@@ -155,7 +144,7 @@ export function generateWhatsAppPayloads(invoice: Invoice, settings: StoreSettin
         text: `Tax Invoice #${invoice.invoiceNumber}`,
       },
       body: {
-        text: `Hello ${invoice.customer.name || 'Customer'},\nThank you for shopping at *${settings.storeName}*! Your total bill is *${formatCurrency(invoice.grandTotal, settings.currencySymbol)}* (${invoice.paymentStatus.toUpperCase()}).`,
+        text: `Hello ${invoice.customer.name || 'Customer'},\nThank you for shopping at *${settings.storeName}*! Your total bill is *${formatCurrency(invoice.grandTotal, settings.currencySymbol)}* (${invoice.paymentStatus.toUpperCase()}).\nOfficial PDF Tax Invoice attached.`,
       },
       footer: {
         text: settings.tagline || 'Retail Billing System',
@@ -166,7 +155,7 @@ export function generateWhatsAppPayloads(invoice: Invoice, settings: StoreSettin
             type: 'reply',
             reply: {
               id: `view_inv_${invoice.invoiceNumber}`,
-              title: '📄 View E-Receipt',
+              title: '🧾 Invoice Receipt',
             },
           },
         ],
@@ -176,7 +165,7 @@ export function generateWhatsAppPayloads(invoice: Invoice, settings: StoreSettin
 
   // 3. Twilio Programmable Messaging API payload
   const twilioApiPayload = {
-    To: `whatsapp:+${fullRecipientNumber}`,
+    To: fullRecipientNumber ? `whatsapp:+${fullRecipientNumber}` : '',
     From: `whatsapp:${settings.twilioFromNumber || '+14155238886'}`,
     Body: plainTextMessage,
   };

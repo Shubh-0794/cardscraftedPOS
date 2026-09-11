@@ -12,9 +12,8 @@ import {
   RefreshCw,
   FileDown,
   Check,
-  Share2,
-  ExternalLink,
-  Copy,
+  Phone,
+  MessageCircle,
 } from 'lucide-react';
 import { ProductQrBadge } from './ProductQrBadge';
 
@@ -38,29 +37,35 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [pdfDownloaded, setPdfDownloaded] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [animationKey, setAnimationKey] = useState<number>(0);
   const [isPrintingAnim, setIsPrintingAnim] = useState(true);
+
+  // Customer WhatsApp phone state (strictly targets customer's number)
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [countryCode, setCountryCode] = useState('+91');
+  const [isEditingPhone, setIsEditingPhone] = useState(false);
 
   useEffect(() => {
     if (isOpen && invoice) {
       setAnimationKey((prev) => prev + 1);
       setIsPrintingAnim(true);
       setPdfDownloaded(false);
-      setCopiedLink(false);
       setShareNotice(null);
+      setCustomerPhone(invoice.customer.phone || '');
+      setCountryCode(invoice.customer.countryCode || '+91');
+      setIsEditingPhone(!invoice.customer.phone);
       posAudio.playReceiptPrintSound();
       const timer = setTimeout(() => {
         setIsPrintingAnim(false);
       }, 900);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, invoice?.id]);
+  }, [isOpen, invoice?.id, invoice?.customer?.phone]);
 
   if (!isOpen || !invoice) return null;
 
-  const payloads = generateWhatsAppPayloads(invoice, settings);
+  const payloads = generateWhatsAppPayloads(invoice, settings, customerPhone, countryCode);
 
   const handlePrint = () => {
     window.print();
@@ -90,14 +95,25 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
     }
   };
 
-  // Share PDF directly to WhatsApp or native share sheet
+  // Share PDF directly to Customer WhatsApp number (Strictly customer only, no e-bill link)
   const handleDispatchWhatsAppPdf = async () => {
+    const cleanPhoneDigits = customerPhone.replace(/\D/g, '');
+    if (!cleanPhoneDigits) {
+      setIsEditingPhone(true);
+      setShareNotice('Please enter the customer WhatsApp phone number');
+      return;
+    }
+
     setIsSendingWhatsApp(true);
     setShareNotice(null);
 
     try {
-      // 1. Build PDF blob & File
+      // 1. Build high-fidelity PDF blob & File for attachment
       const { doc, file, filename } = await createInvoicePdfBlob(invoice, settings);
+
+      // Cleaned phone representation for customer
+      const cleanCountry = countryCode.replace(/\D/g, '') || '91';
+      const fullCustomerNumber = `${cleanCountry}${cleanPhoneDigits}`;
 
       // 2. Check if native Web Share with Files is supported (Android/iOS/Chrome Mobile)
       const canNativeShareFiles =
@@ -110,30 +126,33 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
           await navigator.share({
             files: [file],
             title: `Invoice #${invoice.invoiceNumber} - ${settings.storeName}`,
-            text: `🧾 Invoice #${invoice.invoiceNumber} from ${settings.storeName}\nCustomer: ${invoice.customer.name || 'Valued Customer'}\nTotal: ${formatCurrency(invoice.grandTotal, settings.currencySymbol)}\nView E-Bill: ${payloads.digitalInvoiceLink}`,
+            text: `🧾 Tax Invoice #${invoice.invoiceNumber} from ${settings.storeName}\nCustomer: ${invoice.customer.name || 'Valued Customer'}\nTotal: ${formatCurrency(invoice.grandTotal, settings.currencySymbol)}\n📎 PDF Invoice attached.`,
           });
           onUpdateWhatsAppStatus(invoice.id, 'sent');
           setPdfDownloaded(true);
           posAudio.playSuccessChime();
           setIsSendingWhatsApp(false);
+          setShareNotice(`PDF shared to WhatsApp (+${fullCustomerNumber})!`);
           return;
         } catch (shareErr: any) {
-          // If user cancelled native share, do nothing or fallback
           if (shareErr.name === 'AbortError') {
             setIsSendingWhatsApp(false);
             return;
           }
-          console.warn('Native file share failed, falling back to download + WhatsApp link:', shareErr);
+          console.warn('Native file share fallback:', shareErr);
         }
       }
 
-      // Fallback: Download PDF file & launch WhatsApp chat with full invoice details
+      // Fallback: Download PDF directly and open customer WhatsApp chat
       doc.save(filename);
       setPdfDownloaded(true);
       posAudio.playSuccessChime();
 
-      setShareNotice('PDF downloaded! Attach it directly in WhatsApp.');
-      window.open(payloads.waMeLink, '_blank', 'noopener,noreferrer');
+      setShareNotice(`PDF downloaded & opened chat for +${fullCustomerNumber}!`);
+
+      // Target strictly the customer's WhatsApp chat URL
+      const customerWaMeUrl = `https://wa.me/${fullCustomerNumber}?text=${encodeURIComponent(payloads.plainTextMessage)}`;
+      window.open(customerWaMeUrl, '_blank', 'noopener,noreferrer');
 
       onUpdateWhatsAppStatus(invoice.id, 'sent');
       setTimeout(() => {
@@ -145,12 +164,9 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
     }
   };
 
-  const handleCopyInvoiceLink = () => {
-    navigator.clipboard.writeText(payloads.digitalInvoiceLink);
-    setCopiedLink(true);
-    posAudio.playScanBeep();
-    setTimeout(() => setCopiedLink(false), 2500);
-  };
+  const formattedCustomerPhone = customerPhone
+    ? `${countryCode} ${customerPhone}`
+    : 'No phone entered';
 
   return (
     <div
@@ -373,26 +389,58 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
           </div>
         </div>
 
-        {/* Online Invoice Link Pill */}
-        <div className="px-4 py-2 bg-[#070c17] border-t border-[#1b2b48] flex items-center justify-between text-[11px] shrink-0">
-          <div className="flex items-center gap-1.5 text-slate-400 truncate max-w-[240px]">
-            <ExternalLink className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-            <span className="truncate font-mono text-[10px] text-slate-300">
-              {payloads.digitalInvoiceLink}
-            </span>
+        {/* Customer WhatsApp Destination Info / Quick Edit */}
+        <div className="px-4 py-2.5 bg-[#070c17] border-t border-[#1b2b48] shrink-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                <MessageCircle className="w-3.5 h-3.5" />
+              </div>
+              {isEditingPhone ? (
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-slate-400 font-mono text-xs">{countryCode}</span>
+                  <input
+                    type="tel"
+                    placeholder="10-digit mobile"
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
+                    className="bg-[#111d35] border border-[#233860] rounded-lg px-2 py-0.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-emerald-500 w-32"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingPhone(false)}
+                    className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                  >
+                    Set
+                  </button>
+                </div>
+              ) : (
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">
+                    Customer WhatsApp Number:
+                  </div>
+                  <div className="text-xs font-mono font-bold text-emerald-400 truncate">
+                    {formattedCustomerPhone}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {!isEditingPhone && (
+              <button
+                type="button"
+                onClick={() => setIsEditingPhone(true)}
+                className="text-[10px] text-blue-400 hover:text-blue-300 font-mono hover:underline cursor-pointer shrink-0"
+              >
+                Change #
+              </button>
+            )}
           </div>
-          <button
-            type="button"
-            onClick={handleCopyInvoiceLink}
-            className="px-2 py-0.5 rounded-lg bg-[#14223d] hover:bg-[#1a2d52] text-blue-400 text-[10px] font-bold font-mono transition-colors flex items-center gap-1 cursor-pointer"
-          >
-            {copiedLink ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-            <span>{copiedLink ? 'Copied' : 'Copy Link'}</span>
-          </button>
         </div>
 
         {shareNotice && (
-          <div className="px-4 py-1.5 bg-emerald-950/60 border-t border-emerald-500/30 text-emerald-300 text-[11px] flex items-center gap-1.5 font-mono">
+          <div className="px-4 py-1.5 bg-emerald-950/60 border-t border-emerald-500/30 text-emerald-300 text-[11px] flex items-center gap-1.5 font-mono shrink-0">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             <span>{shareNotice}</span>
           </div>
@@ -400,16 +448,22 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
 
         {/* Action Buttons - PDF & WhatsApp First */}
         <div className="p-4 border-t border-[#1b2b48] bg-[#090f1c] space-y-2 shrink-0">
-          {/* Primary Button: Share PDF directly to WhatsApp */}
+          {/* Primary Button: Share PDF directly to Customer WhatsApp */}
           <button
             type="button"
             onClick={handleDispatchWhatsAppPdf}
             disabled={isSendingWhatsApp}
             className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white rounded-2xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 transition-all cursor-pointer"
-            title="Share PDF invoice directly to WhatsApp"
+            title={`Share PDF invoice directly to customer's WhatsApp (${customerPhone || 'phone'})`}
           >
             <Send className="w-4 h-4" />
-            <span>{isSendingWhatsApp ? 'Preparing PDF Invoice...' : 'Share PDF Directly to WhatsApp'}</span>
+            <span>
+              {isSendingWhatsApp
+                ? 'Preparing PDF Invoice...'
+                : customerPhone
+                ? `Send PDF to WhatsApp (${countryCode} ${customerPhone})`
+                : 'Send PDF to Customer WhatsApp'}
+            </span>
           </button>
 
           <div className="grid grid-cols-3 gap-2">
@@ -458,3 +512,4 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
     </div>
   );
 };
+

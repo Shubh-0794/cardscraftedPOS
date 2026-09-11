@@ -175,10 +175,19 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
                       <Check className="w-3.5 h-3.5 stroke-[3]" />
                     </div>
 
-                    {/* Round colored avatar initial */}
-                    <div className={`w-8 h-8 rounded-full ${avatarColor} flex items-center justify-center font-bold text-xs shrink-0 font-mono shadow-xs`}>
-                      {initial}
-                    </div>
+                    {/* Product Image Thumbnail or colored avatar initial */}
+                    {item.product.image ? (
+                      <img
+                        src={item.product.image}
+                        alt={item.product.name}
+                        referrerPolicy="no-referrer"
+                        className="w-8 h-8 rounded-xl object-cover border border-[#1b2b48] shrink-0 bg-[#15233f] shadow-xs"
+                      />
+                    ) : (
+                      <div className={`w-8 h-8 rounded-full ${avatarColor} flex items-center justify-center font-bold text-xs shrink-0 font-mono shadow-xs`}>
+                        {initial}
+                      </div>
+                    )}
 
                     {/* Title and price */}
                     <div className="min-w-0">
