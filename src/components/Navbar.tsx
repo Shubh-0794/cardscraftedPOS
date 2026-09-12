@@ -123,8 +123,9 @@ export const Navbar: React.FC<NavbarProps> = ({
         <span className="font-semibold text-slate-200">
           {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
         </span>
-        <span className="text-slate-400 text-[11px] font-mono">
-          VPA: <span className="text-blue-400 font-semibold">{settings.upiId || 'quickpos@upi'}</span>
+        <span className="text-slate-400 text-[11px] font-medium flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span className="text-slate-300">Terminal Ready</span>
         </span>
       </div>
     </header>

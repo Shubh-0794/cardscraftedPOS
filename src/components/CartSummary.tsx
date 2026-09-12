@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { BillDiscount, CartItem, Customer, PaymentMethod } from '../types/pos';
 import { CalculationSummary, formatCurrency } from '../utils/taxCalculator';
+import { posAudio } from '../utils/audio';
 import {
   Trash2,
   Plus,
@@ -15,6 +16,7 @@ import {
   Send,
   QrCode,
   Banknote,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface CartSummaryProps {
@@ -30,6 +32,7 @@ interface CartSummaryProps {
   onClearCart: () => void;
   onHoldCart: () => void;
   onProceedToPayment: () => void;
+  onStockAlert?: (msg: string) => void;
 }
 
 const AVATAR_COLORS = [
@@ -54,6 +57,7 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
   onClearCart,
   onHoldCart,
   onProceedToPayment,
+  onStockAlert,
 }) => {
   const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentMethod>('upi');
   const [showDiscountInput, setShowDiscountInput] = useState(false);
@@ -191,9 +195,22 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
 
                     {/* Title and price */}
                     <div className="min-w-0">
-                      <h4 className="font-bold text-xs text-slate-100 truncate">
-                        {item.product.name}
-                      </h4>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h4 className="font-bold text-xs text-slate-100 truncate">
+                          {item.product.name}
+                        </h4>
+                        {typeof item.product.stock === 'number' && (
+                          <span
+                            className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-bold border ${
+                              item.quantity >= item.product.stock
+                                ? 'bg-amber-950/60 text-amber-400 border-amber-500/40'
+                                : 'bg-slate-800 text-slate-400 border-slate-700'
+                            }`}
+                          >
+                            Stock: {item.product.stock}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[11px] text-slate-400 font-mono mt-0.5">
                         {formatCurrency(item.unitPrice, currencySymbol)} × {item.quantity}
                       </p>
@@ -202,21 +219,64 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
 
                   {/* Quantity Stepper & Price */}
                   <div className="flex items-center gap-2 shrink-0">
-                    <div className="flex items-center bg-[#101b33] border border-[#1b2b48] rounded-xl overflow-hidden">
+                    <div className="flex items-center bg-[#101b33] border border-[#1b2b48] rounded-xl overflow-hidden shadow-xs">
                       <button
                         type="button"
                         onClick={() => onUpdateQuantity(item.id, item.quantity - 1)}
-                        className="w-6 h-6 flex items-center justify-center text-slate-400 hover:text-slate-100 hover:bg-[#18284a] text-xs transition-colors"
+                        className="w-6 h-7 flex items-center justify-center text-slate-400 hover:text-slate-100 hover:bg-[#18284a] text-xs transition-colors cursor-pointer"
+                        title="Decrease quantity"
                       >
                         <Minus className="w-3 h-3" />
                       </button>
-                      <span className="w-6 text-center font-mono font-bold text-xs text-slate-100">
-                        {item.quantity}
-                      </span>
+
+                      <input
+                        type="number"
+                        min="1"
+                        max={item.product.stock}
+                        value={item.quantity}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          if (isNaN(val)) return;
+                          const maxStock = typeof item.product.stock === 'number' ? item.product.stock : 999;
+                          if (val > maxStock) {
+                            posAudio.playStockAlertSound();
+                            onStockAlert?.(
+                              `Cannot select ${val} units. Only ${maxStock} in stock for "${item.product.name}"!`
+                            );
+                            onUpdateQuantity(item.id, maxStock);
+                          } else if (val < 1) {
+                            onUpdateQuantity(item.id, 1);
+                          } else {
+                            onUpdateQuantity(item.id, val);
+                          }
+                        }}
+                        className="w-8 h-7 text-center font-mono font-bold text-xs text-slate-100 bg-transparent border-x border-[#1b2b48] focus:outline-hidden focus:bg-[#152342] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        title={`Available stock: ${item.product.stock}`}
+                      />
+
                       <button
                         type="button"
-                        onClick={() => onUpdateQuantity(item.id, item.quantity + 1)}
-                        className="w-6 h-6 flex items-center justify-center text-slate-400 hover:text-slate-100 hover:bg-[#18284a] text-xs transition-colors"
+                        onClick={() => {
+                          const maxStock = typeof item.product.stock === 'number' ? item.product.stock : 999;
+                          if (item.quantity >= maxStock) {
+                            posAudio.playStockAlertSound();
+                            onStockAlert?.(
+                              `Stock limit reached: Only ${maxStock} units of "${item.product.name}" available!`
+                            );
+                            return;
+                          }
+                          onUpdateQuantity(item.id, item.quantity + 1);
+                        }}
+                        className={`w-6 h-7 flex items-center justify-center text-xs transition-colors cursor-pointer ${
+                          item.quantity >= (item.product.stock ?? 999)
+                            ? 'text-slate-600 hover:text-amber-400 hover:bg-[#201c10]'
+                            : 'text-slate-400 hover:text-slate-100 hover:bg-[#18284a]'
+                        }`}
+                        title={
+                          item.quantity >= (item.product.stock ?? 999)
+                            ? `Max stock (${item.product.stock}) reached`
+                            : 'Increase quantity'
+                        }
                       >
                         <Plus className="w-3 h-3" />
                       </button>
@@ -229,7 +289,8 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
                     <button
                       type="button"
                       onClick={() => onRemoveItem(item.id)}
-                      className="p-1 text-slate-500 hover:text-rose-400 rounded-md"
+                      className="p-1 text-slate-500 hover:text-rose-400 rounded-md cursor-pointer transition-colors"
+                      title="Remove item"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>

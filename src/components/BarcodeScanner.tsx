@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Product, StoreSettings } from '../types/pos';
+import { Product, StoreSettings, CartItem } from '../types/pos';
 import { posAudio } from '../utils/audio';
 import { formatCurrency } from '../utils/taxCalculator';
-import { generate24QrLabelsA4Pdf } from '../utils/qrPdfGenerator';
 import {
   Plus,
+  Minus,
   Camera,
   CameraOff,
   Upload,
@@ -14,17 +14,18 @@ import {
   Edit2,
   Video,
   AlertCircle,
+  AlertTriangle,
   QrCode,
-  FileDown,
-  Printer,
   Sparkles,
-  Check,
+  Layers,
+  X,
 } from 'lucide-react';
 import { Html5Qrcode, CameraDevice } from 'html5-qrcode';
 import { ProductQrBadge } from './ProductQrBadge';
 
 interface BarcodeScannerProps {
   products: Product[];
+  cart?: CartItem[];
   onAddToCart: (product: Product, quantity?: number) => void;
   onOpenQuickAddProduct: (scannedBarcode: string) => void;
   onOpenAddProduct?: () => void;
@@ -32,6 +33,7 @@ interface BarcodeScannerProps {
   onViewBarcode?: (barcode: string, name: string, price?: number, sku?: string, category?: string) => void;
   currencySymbol: string;
   settings?: StoreSettings;
+  onStockAlert?: (msg: string) => void;
 }
 
 const AVATAR_COLORS = [
@@ -46,6 +48,7 @@ const AVATAR_COLORS = [
 
 export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   products,
+  cart = [],
   onAddToCart,
   onOpenQuickAddProduct,
   onOpenAddProduct,
@@ -53,6 +56,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   onViewBarcode,
   currencySymbol,
   settings,
+  onStockAlert,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
@@ -64,8 +68,11 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   const [lastScannedInfo, setLastScannedInfo] = useState<{ name: string; barcode: string; time: number } | null>(null);
   const [showQuickTestBarcodes, setShowQuickTestBarcodes] = useState(false);
   const [retryNonce, setRetryNonce] = useState<number>(0);
-  const [isExportingLabels, setIsExportingLabels] = useState(false);
-  const [labelsDownloaded, setLabelsDownloaded] = useState(false);
+
+  // Quick Quantity Selection Modal State
+  const [quantityModalProduct, setQuantityModalProduct] = useState<Product | null>(null);
+  const [modalQty, setModalQty] = useState<number>(1);
+  const [modalQtyError, setModalQtyError] = useState<string | null>(null);
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const hardwareBufferRef = useRef<string>('');
@@ -76,6 +83,11 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
 
   // Extract unique categories
   const categories: string[] = ['All', ...Array.from(new Set(products.map((p) => p.category))).map(String)];
+
+  const getInCartQty = (productId: string) => {
+    const item = cart.find((c) => c.product.id === productId);
+    return item ? item.quantity : 0;
+  };
 
   const handleProcessBarcode = (code: string) => {
     const cleanCode = code.trim();
@@ -97,24 +109,35 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         p.sku.toLowerCase() === cleanCode.toLowerCase()
     );
 
-    if (matched) {
+    const targetProduct = matched || products.find((p) => p.name.toLowerCase() === cleanCode.toLowerCase());
+
+    if (targetProduct) {
+      const maxStock = typeof targetProduct.stock === 'number' ? targetProduct.stock : 999;
+      const inCart = getInCartQty(targetProduct.id);
+
+      if (maxStock <= 0) {
+        posAudio.playStockAlertSound();
+        onStockAlert?.(`Out of Stock: "${targetProduct.name}" has 0 units available!`);
+        return;
+      }
+
+      if (inCart >= maxStock) {
+        posAudio.playStockAlertSound();
+        onStockAlert?.(
+          `Stock limit reached: All ${maxStock} units of "${targetProduct.name}" are already in cart!`
+        );
+        return;
+      }
+
       posAudio.playScanBeep();
-      onAddToCart(matched, 1);
-      setLastScannedInfo({ name: matched.name, barcode: cleanCode, time: Date.now() });
+      onAddToCart(targetProduct, 1);
+      setLastScannedInfo({ name: targetProduct.name, barcode: cleanCode, time: Date.now() });
       setSearchQuery('');
     } else {
-      const nameMatch = products.find((p) => p.name.toLowerCase() === cleanCode.toLowerCase());
-      if (nameMatch) {
-        posAudio.playScanBeep();
-        onAddToCart(nameMatch, 1);
-        setLastScannedInfo({ name: nameMatch.name, barcode: cleanCode, time: Date.now() });
-        setSearchQuery('');
-      } else {
-        posAudio.playErrorBuzz();
-        setLastScannedInfo({ name: 'New QR Code', barcode: cleanCode, time: Date.now() });
-        onOpenQuickAddProduct(cleanCode);
-        setSearchQuery('');
-      }
+      posAudio.playErrorBuzz();
+      setLastScannedInfo({ name: 'New QR Code', barcode: cleanCode, time: Date.now() });
+      onOpenQuickAddProduct(cleanCode);
+      setSearchQuery('');
     }
   };
 
@@ -345,45 +368,6 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
     }
 
     handleProcessBarcode(searchQuery);
-  };
-
-  // Download 24 QR Labels in A4 format (Single Sheet PDF)
-  const handleDownload24QrSheet = async () => {
-    setIsExportingLabels(true);
-    try {
-      const fallbackSettings: StoreSettings = settings || {
-        storeName: 'Cardcrafted',
-        tagline: 'Retail POS',
-        gstin: '',
-        address: 'Shop #14-16, Commercial Hub',
-        city: 'Mumbai',
-        state: 'Maharashtra',
-        pincode: '400050',
-        phone: '+91 98201 54321',
-        email: 'billing@pos.com',
-        upiId: 'store@upi',
-        upiPayeeName: 'Cardcrafted POS',
-        currencySymbol,
-        currencyCode: 'INR',
-        taxType: 'none',
-        whatsappApiProvider: 'direct_wa_me',
-        invoiceFooterNote: 'Thank you for shopping!',
-        termsAndConditions: '',
-        thermalPaperWidth: '80mm',
-        enableBeepSound: true,
-        autoOpenWhatsApp: true,
-      };
-
-      await generate24QrLabelsA4Pdf(products, fallbackSettings);
-      setLabelsDownloaded(true);
-      posAudio.playSuccessChime();
-      setTimeout(() => setLabelsDownloaded(false), 3500);
-    } catch (err) {
-      console.error('Failed to generate 24 QR Label sheet PDF:', err);
-      alert('Could not generate QR PDF. Please try again.');
-    } finally {
-      setIsExportingLabels(false);
-    }
   };
 
   return (
@@ -650,15 +634,37 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           filteredProducts.map((product, idx) => {
             const avatarColor = AVATAR_COLORS[idx % AVATAR_COLORS.length];
             const initial = product.name.charAt(0).toUpperCase();
+            const inCart = getInCartQty(product.id);
+            const maxStock = typeof product.stock === 'number' ? product.stock : 999;
+            const isOutOfStock = maxStock <= 0;
+            const isCartFull = inCart >= maxStock;
 
             return (
               <div
                 key={product.id}
                 onClick={() => {
+                  if (isOutOfStock) {
+                    posAudio.playStockAlertSound();
+                    onStockAlert?.(`Out of Stock: "${product.name}" has 0 units in stock.`);
+                    return;
+                  }
+                  if (isCartFull) {
+                    posAudio.playStockAlertSound();
+                    onStockAlert?.(
+                      `Stock limit reached: All ${maxStock} units of "${product.name}" are already in your cart!`
+                    );
+                    return;
+                  }
                   posAudio.playScanBeep();
                   onAddToCart(product, 1);
                 }}
-                className="bg-[#0b1325] hover:bg-[#101b33] border border-[#1a2b47] hover:border-blue-500/50 rounded-2xl p-3 flex items-center justify-between cursor-pointer transition-all shadow-xs group"
+                className={`border rounded-2xl p-3 flex items-center justify-between cursor-pointer transition-all shadow-xs group ${
+                  isOutOfStock
+                    ? 'bg-[#0a0f1d]/60 border-rose-950/40 opacity-70 hover:border-rose-700/50'
+                    : isCartFull
+                    ? 'bg-[#0d162a] border-amber-500/30 hover:border-amber-400/50'
+                    : 'bg-[#0b1325] hover:bg-[#101b33] border-[#1a2b47] hover:border-blue-500/50'
+                }`}
               >
                 <div className="flex items-center gap-3 min-w-0">
                   {product.image ? (
@@ -674,9 +680,34 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                     </div>
                   )}
                   <div className="min-w-0">
-                    <h4 className="font-bold text-xs text-slate-100 truncate group-hover:text-blue-400 transition-colors">
-                      {product.name}
-                    </h4>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h4 className="font-bold text-xs text-slate-100 truncate group-hover:text-blue-400 transition-colors">
+                        {product.name}
+                      </h4>
+                      {isOutOfStock ? (
+                        <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-bold bg-rose-950 text-rose-400 border border-rose-800">
+                          OUT OF STOCK
+                        </span>
+                      ) : (
+                        <span
+                          className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-bold border ${
+                            isCartFull
+                              ? 'bg-amber-950 text-amber-400 border-amber-800'
+                              : maxStock <= 5
+                              ? 'bg-amber-950/50 text-amber-300 border-amber-700/50'
+                              : 'bg-slate-800 text-slate-300 border-slate-700'
+                          }`}
+                        >
+                          Stock: {maxStock}
+                        </span>
+                      )}
+                      {inCart > 0 && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-bold bg-blue-950 text-blue-300 border border-blue-800">
+                          In Cart: {inCart}
+                        </span>
+                      )}
+                    </div>
+
                     <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono mt-0.5 flex-wrap">
                       <span>{product.category}</span>
                       <span>•</span>
@@ -692,18 +723,15 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                         QR: {product.barcode}
                       </button>
                       <span>•</span>
-                      <span className="inline-flex items-center gap-1.5">
-                        <span>{product.stock} in stock</span>
-                        <ProductQrBadge
-                          code={product.barcode}
-                          size={15}
-                          clickable={true}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onViewBarcode?.(product.barcode, product.name, product.unitPrice, product.sku, product.category);
-                          }}
-                        />
-                      </span>
+                      <ProductQrBadge
+                        code={product.barcode}
+                        size={15}
+                        clickable={true}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onViewBarcode?.(product.barcode, product.name, product.unitPrice, product.sku, product.category);
+                        }}
+                      />
                     </div>
                   </div>
                 </div>
@@ -712,6 +740,23 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                   <span className="font-bold text-xs text-slate-100 font-mono">
                     {formatCurrency(product.unitPrice, currencySymbol)}
                   </span>
+
+                  {/* Quantity selector button */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setQuantityModalProduct(product);
+                      const rem = Math.max(1, Math.min(1, maxStock - inCart));
+                      setModalQty(rem > 0 ? rem : 1);
+                      setModalQtyError(null);
+                    }}
+                    title="Select quantity"
+                    className="px-2 py-1 rounded-lg bg-[#14223d] hover:bg-indigo-600 text-indigo-300 hover:text-white text-[11px] font-bold font-mono transition-colors cursor-pointer border border-[#1d2d4e]"
+                  >
+                    Qty
+                  </button>
+
                   {onEditProduct && (
                     <button
                       type="button"
@@ -725,7 +770,16 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                   )}
-                  <div className="w-7 h-7 rounded-xl bg-[#14223d] group-hover:bg-blue-600 text-slate-300 group-hover:text-white flex items-center justify-center transition-colors">
+
+                  <div
+                    className={`w-7 h-7 rounded-xl flex items-center justify-center transition-colors ${
+                      isOutOfStock
+                        ? 'bg-rose-950/40 text-rose-500'
+                        : isCartFull
+                        ? 'bg-amber-950/40 text-amber-500'
+                        : 'bg-[#14223d] group-hover:bg-blue-600 text-slate-300 group-hover:text-white'
+                    }`}
+                  >
                     <Plus className="w-3.5 h-3.5" />
                   </div>
                 </div>
@@ -750,49 +804,226 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         )}
       </div>
 
-      {/* Button Under Product: Download QR Labels in A4 Size PDF (Exact count, 24 per page, no repeat) */}
-      <div className="pt-2 border-t border-[#1b2b48]">
-        <button
-          type="button"
-          onClick={handleDownload24QrSheet}
-          disabled={isExportingLabels || products.length === 0}
-          className="w-full py-2.5 px-3.5 bg-linear-to-r from-blue-900/40 via-[#132342] to-blue-900/40 hover:from-blue-800/60 hover:to-blue-800/60 border border-blue-500/40 hover:border-blue-400 text-slate-100 rounded-2xl text-xs font-bold flex items-center justify-between transition-all shadow-md group cursor-pointer"
-          title="Download printable A4 sheet with product QR labels (24 per page, no repetition)"
-        >
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
-              <QrCode className="w-4 h-4" />
+      {/* Quick Quantity Picker Modal */}
+      {quantityModalProduct && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#0b1325] border border-[#1b2b48] rounded-3xl w-full max-w-sm p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-[#1b2b48]">
+              <div className="flex items-center gap-2">
+                <Layers className="w-5 h-5 text-blue-400" />
+                <h3 className="font-bold text-sm text-slate-100">Select Quantity</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQuantityModalProduct(null)}
+                className="p-1 text-slate-400 hover:text-slate-100 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-            <div className="text-left">
-              <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
-                <span>Download Product QR Labels (A4 PDF)</span>
-                <span className="px-1.5 py-0.2 bg-blue-500/20 text-blue-300 text-[10px] font-mono rounded border border-blue-400/30">
-                  {products.length} {products.length === 1 ? 'Label' : 'Labels'} • {Math.ceil(products.length / 24) || 1} {Math.ceil(products.length / 24) <= 1 ? 'Page' : 'Pages'}
+
+            <div className="bg-[#0e172a] rounded-2xl p-3 border border-[#1a2947] flex items-center gap-3">
+              {quantityModalProduct.image ? (
+                <img
+                  src={quantityModalProduct.image}
+                  alt={quantityModalProduct.name}
+                  referrerPolicy="no-referrer"
+                  className="w-12 h-12 rounded-xl object-cover border border-[#1b2b48]"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white text-base">
+                  {quantityModalProduct.name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <h4 className="font-bold text-sm text-slate-100 truncate">
+                  {quantityModalProduct.name}
+                </h4>
+                <div className="flex items-center justify-between mt-1 text-xs">
+                  <span className="text-blue-400 font-mono font-bold">
+                    {formatCurrency(quantityModalProduct.unitPrice, currencySymbol)}
+                  </span>
+                  <span className="font-mono text-amber-400 font-bold bg-amber-950/60 border border-amber-800/50 px-2 py-0.5 rounded-md">
+                    Stock: {quantityModalProduct.stock} available
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* In Cart summary */}
+            {getInCartQty(quantityModalProduct.id) > 0 && (
+              <div className="text-[11px] font-mono text-slate-400 bg-[#121e36] px-3 py-1.5 rounded-xl flex justify-between">
+                <span>Already in cart:</span>
+                <span className="text-slate-200 font-bold">
+                  {getInCartQty(quantityModalProduct.id)} / {quantityModalProduct.stock} units
                 </span>
               </div>
-              <div className="text-[10px] text-slate-400 font-normal">
-                1 label per product • Up to 24 per A4 sheet (no repeat)
+            )}
+
+            {/* Stepper + Input */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-300">Quantity to Add:</label>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = Math.max(1, modalQty - 1);
+                    setModalQty(next);
+                    setModalQtyError(null);
+                  }}
+                  className="w-10 h-10 rounded-xl bg-[#14223d] border border-[#1b2b48] text-slate-200 hover:bg-[#1c2e52] flex items-center justify-center cursor-pointer"
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
+
+                <input
+                  type="number"
+                  min="1"
+                  max={quantityModalProduct.stock}
+                  value={modalQty}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    const maxStock = typeof quantityModalProduct.stock === 'number' ? quantityModalProduct.stock : 999;
+                    if (isNaN(val)) {
+                      setModalQty(1);
+                      return;
+                    }
+                    if (val > maxStock) {
+                      posAudio.playStockAlertSound();
+                      setModalQty(maxStock);
+                      setModalQtyError(
+                        `Cannot select ${val} units. Only ${maxStock} in stock for "${quantityModalProduct.name}"!`
+                      );
+                    } else if (val < 1) {
+                      setModalQty(1);
+                      setModalQtyError(null);
+                    } else {
+                      setModalQty(val);
+                      setModalQtyError(null);
+                    }
+                  }}
+                  className="flex-1 h-10 text-center font-mono font-bold text-base text-slate-100 bg-[#0e172a] border border-[#1b2b48] rounded-xl focus:outline-hidden focus:border-blue-500"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const maxStock = typeof quantityModalProduct.stock === 'number' ? quantityModalProduct.stock : 999;
+                    if (modalQty >= maxStock) {
+                      posAudio.playStockAlertSound();
+                      setModalQtyError(
+                        `Stock limit reached: Only ${maxStock} units of "${quantityModalProduct.name}" available in stock!`
+                      );
+                      return;
+                    }
+                    setModalQty(modalQty + 1);
+                    setModalQtyError(null);
+                  }}
+                  className="w-10 h-10 rounded-xl bg-[#14223d] border border-[#1b2b48] text-slate-200 hover:bg-[#1c2e52] flex items-center justify-center cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
               </div>
+
+              {/* Quick Presets */}
+              <div className="flex gap-1.5 pt-1">
+                {[1, 2, 4, 10].map((preset) => {
+                  const maxStock = typeof quantityModalProduct.stock === 'number' ? quantityModalProduct.stock : 999;
+                  const isOverStock = preset > maxStock;
+                  return (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        if (isOverStock) {
+                          posAudio.playStockAlertSound();
+                          setModalQty(maxStock);
+                          setModalQtyError(
+                            `Cannot select ${preset} units. Only ${maxStock} available for "${quantityModalProduct.name}"!`
+                          );
+                        } else {
+                          setModalQty(preset);
+                          setModalQtyError(null);
+                        }
+                      }}
+                      className={`flex-1 py-1 text-[11px] font-bold font-mono rounded-lg border transition-colors cursor-pointer ${
+                        modalQty === preset
+                          ? 'bg-blue-600 text-white border-blue-500'
+                          : isOverStock
+                          ? 'bg-rose-950/40 text-rose-400 border-rose-800/40 hover:bg-rose-900/40'
+                          : 'bg-[#101b33] text-slate-300 border-[#1b2b48] hover:bg-[#18284a]'
+                      }`}
+                      title={isOverStock ? `Exceeds stock of ${maxStock}` : `Select ${preset}`}
+                    >
+                      {preset}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const maxStock = typeof quantityModalProduct.stock === 'number' ? quantityModalProduct.stock : 999;
+                    setModalQty(maxStock);
+                    setModalQtyError(null);
+                  }}
+                  className="px-2 py-1 text-[11px] font-bold font-mono rounded-lg bg-amber-950 text-amber-300 border border-amber-700/50 hover:bg-amber-900 cursor-pointer"
+                >
+                  Max ({quantityModalProduct.stock})
+                </button>
+              </div>
+
+              {/* Error / Alert Message */}
+              {modalQtyError && (
+                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-rose-950/80 border border-rose-800/80 text-rose-300 text-xs animate-shake">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                  <span className="font-semibold">{modalQtyError}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Total and Submit */}
+            <div className="pt-2 border-t border-[#1b2b48] flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-mono">Total</span>
+                <p className="font-bold text-base text-slate-100 font-mono">
+                  {formatCurrency(quantityModalProduct.unitPrice * modalQty, currencySymbol)}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const maxStock = typeof quantityModalProduct.stock === 'number' ? quantityModalProduct.stock : 999;
+                  const inCart = getInCartQty(quantityModalProduct.id);
+                  if (inCart + modalQty > maxStock) {
+                    const allowed = Math.max(0, maxStock - inCart);
+                    posAudio.playStockAlertSound();
+                    if (allowed <= 0) {
+                      onStockAlert?.(
+                        `Cannot add more! All ${maxStock} units of "${quantityModalProduct.name}" are already in your cart.`
+                      );
+                      setQuantityModalProduct(null);
+                      return;
+                    }
+                    onStockAlert?.(
+                      `Stock Limit: Cannot select ${modalQty}. Only ${maxStock} units available (${inCart} in cart). Added ${allowed}.`
+                    );
+                    onAddToCart(quantityModalProduct, allowed);
+                  } else {
+                    posAudio.playScanBeep();
+                    onAddToCart(quantityModalProduct, modalQty);
+                  }
+                  setQuantityModalProduct(null);
+                }}
+                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-lg shadow-blue-900/30 flex items-center gap-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add to Bill</span>
+              </button>
             </div>
           </div>
-
-          <div className="flex items-center gap-1.5 text-blue-400 group-hover:text-blue-300 font-mono text-xs">
-            {labelsDownloaded ? (
-              <span className="inline-flex items-center gap-1 text-emerald-400 font-bold">
-                <Check className="w-3.5 h-3.5" /> Done!
-              </span>
-            ) : isExportingLabels ? (
-              <span className="inline-flex items-center gap-1">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating...
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 font-bold">
-                <FileDown className="w-4 h-4" /> Download PDF
-              </span>
-            )}
-          </div>
-        </button>
-      </div>
+        </div>
+      )}
     </div>
   );
 };

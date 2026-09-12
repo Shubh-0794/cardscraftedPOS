@@ -86,7 +86,7 @@ export interface SupabaseDiagnosticResult {
  */
 export async function runSupabaseDiagnostics(): Promise<SupabaseDiagnosticResult> {
   const projectId = SUPABASE_URL.replace('https://', '').split('.')[0] || 'unknown';
-  const tables = ['app_data', 'products', 'customers', 'invoices'];
+  const tables = ['app_data', 'products', 'customers', 'invoices', 'store_settings', 'upi_configs'];
   const tableResults: TableDiagnostic[] = [];
 
   let connected = false;
@@ -548,10 +548,87 @@ export async function syncAllDataToSupabase(payload: {
       }
     }
 
+    // 3. Sync Store Settings and UPI data to dedicated relational tables
+    if (payload.settings) {
+      try {
+        await syncStoreSettingsToSupabase(payload.settings);
+      } catch (e) {
+        console.warn('[Supabase] Store settings sync note:', e);
+      }
+    }
+
     return { success: errorCount === 0, errorCount };
   } catch (err) {
     console.error('[Supabase] Failed to sync all data:', err);
     return { success: false, errorCount: errorCount + 1 };
+  }
+}
+
+/**
+ * Directly persist Store and UPI configuration to Supabase relational tables and snapshot
+ */
+export async function syncStoreSettingsToSupabase(settings: StoreSettings): Promise<boolean> {
+  try {
+    // 1. Sync to dedicated relational table 'store_settings'
+    const { error: setErr } = await supabase.from('store_settings').upsert(
+      {
+        id: 'default_store',
+        store_name: settings.storeName || 'Cardcrafted',
+        tagline: settings.tagline || '',
+        phone: settings.phone || '',
+        email: settings.email || '',
+        gstin: settings.gstin || '',
+        address: settings.address || '',
+        city: settings.city || '',
+        state: settings.state || '',
+        pincode: settings.pincode || '',
+        upi_id: settings.upiId || 'quickpos@upi',
+        upi_payee_name: settings.upiPayeeName || '',
+        currency_symbol: settings.currencySymbol || '₹',
+        currency_code: settings.currencyCode || 'INR',
+        tax_type: settings.taxType || 'none',
+        invoice_footer_note: settings.invoiceFooterNote || '',
+        terms_and_conditions: settings.termsAndConditions || '',
+        data: settings,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    );
+
+    if (setErr) {
+      console.warn('[Supabase] Warning syncing store_settings table:', setErr.message);
+    }
+
+    // 2. Also record in dedicated 'upi_configs' table
+    if (settings.upiId) {
+      try {
+        await supabase.from('upi_configs').upsert(
+          {
+            id: 'primary_upi',
+            upi_id: settings.upiId,
+            payee_name: settings.upiPayeeName || settings.storeName,
+            is_active: true,
+            data: {
+              upiId: settings.upiId,
+              upiPayeeName: settings.upiPayeeName,
+              storeName: settings.storeName,
+            },
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'id' }
+        );
+      } catch (err) {
+        console.warn('[Supabase] upi_configs table update note:', err);
+      }
+    }
+
+    // 3. Save to app_data snapshot store
+    await saveAppDataToSupabase('store_settings', settings);
+
+    return true;
+  } catch (e) {
+    console.error('[Supabase] Error syncing store & UPI settings:', e);
+    return false;
   }
 }
 
@@ -567,7 +644,7 @@ export async function fetchAllDataFromSupabase(): Promise<{
 } | null> {
   try {
     // 1. Fetch from app_data snapshot store
-    const [snapshotProducts, snapshotCustomers, snapshotInvoices, snapshotHoldCarts, snapshotSettings] =
+    let [snapshotProducts, snapshotCustomers, snapshotInvoices, snapshotHoldCarts, snapshotSettings] =
       await Promise.all([
         getAppDataFromSupabase<Product[]>('products'),
         getAppDataFromSupabase<Customer[]>('customers'),
@@ -656,6 +733,43 @@ export async function fetchAllDataFromSupabase(): Promise<{
       // ignore
     }
 
+    // Check store_settings and upi_configs relational tables
+    try {
+      const { data: storeRows } = await supabase.from('store_settings').select('*').limit(1);
+      if (storeRows && storeRows.length > 0) {
+        const sRow = storeRows[0];
+        if (sRow.data && typeof sRow.data === 'object') {
+          snapshotSettings = { ...sRow.data, ...(snapshotSettings || {}) };
+        } else {
+          snapshotSettings = {
+            storeName: sRow.store_name || 'Cardcrafted',
+            tagline: sRow.tagline || '',
+            gstin: sRow.gstin || '',
+            address: sRow.address || '',
+            city: sRow.city || '',
+            state: sRow.state || '',
+            pincode: sRow.pincode || '',
+            phone: sRow.phone || '',
+            email: sRow.email || '',
+            upiId: sRow.upi_id || 'quickpos@upi',
+            upiPayeeName: sRow.upi_payee_name || '',
+            currencySymbol: sRow.currency_symbol || '₹',
+            currencyCode: sRow.currency_code || 'INR',
+            taxType: sRow.tax_type || 'none',
+            whatsappApiProvider: 'direct_wa_me',
+            invoiceFooterNote: sRow.invoice_footer_note || '',
+            termsAndConditions: sRow.terms_and_conditions || '',
+            thermalPaperWidth: '80mm',
+            enableBeepSound: true,
+            autoOpenWhatsApp: true,
+            ...(snapshotSettings || {}),
+          };
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+
     // 3. Reconcile Products (authoritative relational table when available, fallback to snapshot)
     let mergedProducts: Product[] = [];
     if (relProducts.length > 0) {
@@ -719,7 +833,7 @@ export async function fetchAllDataFromSupabase(): Promise<{
 }
 
 /**
- * SQL Schema for easy creation in Supabase SQL Editor
+ * Complete SQL Schema for easy creation in Supabase SQL Editor / PostgreSQL
  */
 export const SUPABASE_SQL_SCHEMA = `-- ==========================================
 -- QUICKPOS / CARDCRAFTED SUPABASE DATABASE SETUP
@@ -784,18 +898,57 @@ CREATE TABLE IF NOT EXISTS public.invoices (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. Helpful Performance Indexes
+-- 5. Store Settings & Business Profile Table
+CREATE TABLE IF NOT EXISTS public.store_settings (
+  id TEXT PRIMARY KEY DEFAULT 'default_store',
+  store_name TEXT NOT NULL DEFAULT 'Cardcrafted',
+  tagline TEXT,
+  phone TEXT,
+  email TEXT,
+  gstin TEXT,
+  address TEXT,
+  city TEXT,
+  state TEXT,
+  pincode TEXT,
+  upi_id TEXT NOT NULL DEFAULT 'quickpos@upi',
+  upi_payee_name TEXT,
+  currency_symbol TEXT DEFAULT '₹',
+  currency_code TEXT DEFAULT 'INR',
+  tax_type TEXT DEFAULT 'none',
+  invoice_footer_note TEXT,
+  terms_and_conditions TEXT,
+  data JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. Dedicated UPI Configurations & Payment Endpoints
+CREATE TABLE IF NOT EXISTS public.upi_configs (
+  id TEXT PRIMARY KEY DEFAULT 'primary_upi',
+  upi_id TEXT NOT NULL,
+  payee_name TEXT,
+  is_active BOOLEAN DEFAULT true,
+  data JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. Helpful Performance Indexes
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON public.products(barcode);
 CREATE INDEX IF NOT EXISTS idx_customers_phone ON public.customers(phone);
 CREATE INDEX IF NOT EXISTS idx_invoices_number ON public.invoices(invoice_number);
+CREATE INDEX IF NOT EXISTS idx_store_settings_upi ON public.store_settings(upi_id);
+CREATE INDEX IF NOT EXISTS idx_upi_configs_id ON public.upi_configs(upi_id);
 
--- 6. Enable Row Level Security (RLS)
+-- 8. Enable Row Level Security (RLS)
 ALTER TABLE public.app_data ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.store_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.upi_configs ENABLE ROW LEVEL SECURITY;
 
--- 7. Grant Clean, Permissive Public Access Policies for POS Terminal
+-- 9. Grant Clean Permissive Public Access Policies for POS Terminal
 DROP POLICY IF EXISTS "Allow all on app_data" ON public.app_data;
 CREATE POLICY "Allow all on app_data" 
   ON public.app_data 
@@ -823,6 +976,22 @@ CREATE POLICY "Allow all on customers"
 DROP POLICY IF EXISTS "Allow all on invoices" ON public.invoices;
 CREATE POLICY "Allow all on invoices" 
   ON public.invoices 
+  FOR ALL 
+  TO anon, authenticated 
+  USING (true) 
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on store_settings" ON public.store_settings;
+CREATE POLICY "Allow all on store_settings" 
+  ON public.store_settings 
+  FOR ALL 
+  TO anon, authenticated 
+  USING (true) 
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on upi_configs" ON public.upi_configs;
+CREATE POLICY "Allow all on upi_configs" 
+  ON public.upi_configs 
   FOR ALL 
   TO anon, authenticated 
   USING (true) 

@@ -81,6 +81,20 @@ export const INITIAL_CUSTOMERS: Customer[] = [
 
 export const INITIAL_PRODUCTS: Product[] = [
   {
+    id: 'prod-ganesha',
+    sku: 'DEC-001',
+    barcode: '8901999004441',
+    name: 'Ganesha Idol (Brass Antique Finish)',
+    category: 'Gifts & Decor',
+    unitPrice: 750.0,
+    mrp: 999.0,
+    gstRate: 12,
+    hsnCode: '8306',
+    stock: 4,
+    unit: 'pcs',
+    image: 'https://images.unsplash.com/photo-1567591414240-e224e756c650?auto=format&fit=crop&w=400&q=80',
+  },
+  {
     id: 'prod-1',
     sku: 'BEV-001',
     barcode: '8901030383344',

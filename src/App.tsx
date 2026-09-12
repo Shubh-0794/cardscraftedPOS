@@ -29,7 +29,8 @@ import { QuickAddProductModal } from './components/QuickAddProductModal';
 import { ProductFormModal } from './components/ProductFormModal';
 import { QrCodeViewerModal, QrCodeViewerData } from './components/QrCodeViewerModal';
 import { CustomerPaymentPortal } from './components/CustomerPaymentPortal';
-import { Trash2 } from 'lucide-react';
+import { EditCustomerModal } from './components/EditCustomerModal';
+import { Trash2, Edit2, Crown, Calendar, TrendingUp, ArrowUpDown, History, ExternalLink, AlertTriangle, X } from 'lucide-react';
 import {
   supabase,
   syncAllDataToSupabase,
@@ -39,6 +40,7 @@ import {
   syncSingleCustomerToSupabase,
   deleteCustomerFromSupabase,
   deleteProductFromSupabase,
+  saveAppDataToSupabase,
   CLIENT_INSTANCE_ID,
 } from './lib/supabase';
 
@@ -105,11 +107,67 @@ export default function App() {
   const [quickAddBarcode, setQuickAddBarcode] = useState<string | null>(null);
   const [isProductFormOpen, setIsProductFormOpen] = useState(false);
   const [productToEdit, setProductToEdit] = useState<Product | null>(null);
+  const [customerToEdit, setCustomerToEdit] = useState<Customer | null>(null);
   const [barcodeViewerData, setBarcodeViewerData] = useState<QrCodeViewerData | null>(null);
   const [customerPaymentData, setCustomerPaymentData] = useState<{
     invoiceNumber: string;
     amount: number;
   } | null>(null);
+
+  // History tab filtering and sorting
+  const [historyTabRange, setHistoryTabRange] = useState<'today' | 'weekly' | 'monthly' | 'yearly' | 'all'>('today');
+  const [historyTabSort, setHistoryTabSort] = useState<'date-desc' | 'amount-desc'>('date-desc');
+
+  // Identify highest purchase customer for People tab
+  const highestSpenderCustomer = useMemo(() => {
+    const eligible = customers.filter(
+      (c) => c.id !== 'walk-in' && (c.totalSpent || 0) > 0
+    );
+    if (eligible.length === 0) return null;
+    return eligible.reduce(
+      (prev, curr) => ((curr.totalSpent || 0) > (prev.totalSpent || 0) ? curr : prev),
+      eligible[0]
+    );
+  }, [customers]);
+
+  // Compute Today's Daily Sale metrics
+  const todaySalesMetrics = useMemo(() => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const todayInvoices = invoices.filter(
+      (inv) => new Date(inv.timestamp).getTime() >= todayStart
+    );
+    const total = todayInvoices.reduce((acc, inv) => acc + inv.grandTotal, 0);
+    return {
+      total,
+      count: todayInvoices.length,
+    };
+  }, [invoices]);
+
+  // Filtered invoices for the History Tab
+  const filteredHistoryInvoices = useMemo(() => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const oneWeekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+    const oneMonthAgo = now.getTime() - 30 * 24 * 60 * 60 * 1000;
+    const oneYearAgo = now.getTime() - 365 * 24 * 60 * 60 * 1000;
+
+    const list = invoices.filter((inv) => {
+      const invTime = new Date(inv.timestamp).getTime();
+      if (historyTabRange === 'today' && invTime < todayStart) return false;
+      if (historyTabRange === 'weekly' && invTime < oneWeekAgo) return false;
+      if (historyTabRange === 'monthly' && invTime < oneMonthAgo) return false;
+      if (historyTabRange === 'yearly' && invTime < oneYearAgo) return false;
+      return true;
+    });
+
+    return [...list].sort((a, b) => {
+      if (historyTabSort === 'amount-desc') {
+        return b.grandTotal - a.grandTotal;
+      }
+      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+    });
+  }, [invoices, historyTabRange, historyTabSort]);
 
   // Listen for direct URL routing (?view_invoice=... or ?pay=...&amt=120)
   useEffect(() => {
@@ -242,9 +300,16 @@ export default function App() {
           if (cloudData.invoices && cloudData.invoices.length > 0) {
             setInvoices(cloudData.invoices);
           }
-          if (cloudData.holdCarts) {
-            setHoldCarts(cloudData.holdCarts);
-          }
+          // Intelligently preserve held carts on reload
+          const localSavedHold = localStorage.getItem('nexus_pos_hold_carts');
+          const localHoldList: HoldCart[] = localSavedHold ? JSON.parse(localSavedHold) : [];
+          const mergedHoldCarts =
+            cloudData.holdCarts && cloudData.holdCarts.length > 0
+              ? cloudData.holdCarts
+              : localHoldList;
+          setHoldCarts(mergedHoldCarts);
+          localStorage.setItem('nexus_pos_hold_carts', JSON.stringify(mergedHoldCarts));
+
           if (cloudData.settings) {
             setSettings(cloudData.settings);
           }
@@ -413,6 +478,25 @@ export default function App() {
   }, []);
 
 
+  // Stock alert toast state
+  const [stockAlert, setStockAlert] = useState<{
+    message: string;
+    productName?: string;
+    maxStock?: number;
+    requested?: number;
+  } | null>(null);
+
+  const triggerStockAlert = useCallback(
+    (message: string, productName?: string, maxStock?: number, requested?: number) => {
+      posAudio.playStockAlertSound();
+      setStockAlert({ message, productName, maxStock, requested });
+      setTimeout(() => {
+        setStockAlert((current) => (current?.message === message ? null : current));
+      }, 4500);
+    },
+    []
+  );
+
   // Audio initialization
   useEffect(() => {
     posAudio.setEnabled(isSoundEnabled);
@@ -423,57 +507,128 @@ export default function App() {
     return calculateCartTotals(cart, billDiscount, false);
   }, [cart, billDiscount]);
 
-  // Add item to cart
-  const handleAddToCart = useCallback((product: Product, quantity: number = 1) => {
-    setCart((prevCart) => {
-      const existingIndex = prevCart.findIndex((item) => item.product.id === product.id);
+  // Add item to cart with strict stock limit validation & audio alert
+  const handleAddToCart = useCallback(
+    (product: Product, quantity: number = 1) => {
+      const maxStock = typeof product.stock === 'number' ? Math.max(0, product.stock) : 999;
 
-      if (existingIndex > -1) {
-        const existing = prevCart[existingIndex];
-        const newQty = existing.quantity + quantity;
-        const financials = calculateItemFinancials(
-          existing.unitPrice,
-          newQty,
-          product.gstRate,
-          existing.discountType,
-          existing.discountValue
+      if (maxStock <= 0) {
+        triggerStockAlert(
+          `Out of Stock: "${product.name}" has 0 units in stock! Cannot add to bill.`,
+          product.name,
+          0,
+          quantity
         );
-
-        const updated = [...prevCart];
-        updated[existingIndex] = {
-          ...existing,
-          quantity: newQty,
-          taxableAmount: financials.taxableAmount,
-          gstAmount: financials.gstAmount,
-          totalAmount: financials.totalAmount,
-        };
-        return updated;
-      } else {
-        const financials = calculateItemFinancials(
-          product.unitPrice,
-          quantity,
-          product.gstRate,
-          'percent',
-          0
-        );
-
-        const newItem: CartItem = {
-          id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          product,
-          quantity,
-          unitPrice: product.unitPrice,
-          discountType: 'percent',
-          discountValue: 0,
-          taxableAmount: financials.taxableAmount,
-          gstAmount: financials.gstAmount,
-          totalAmount: financials.totalAmount,
-        };
-        return [...prevCart, newItem];
+        return;
       }
-    });
+
+      setCart((prevCart) => {
+        const existingIndex = prevCart.findIndex((item) => item.product.id === product.id);
+
+        if (existingIndex > -1) {
+          const existing = prevCart[existingIndex];
+          const requestedTotal = existing.quantity + quantity;
+
+          if (requestedTotal > maxStock) {
+            const availableRemaining = Math.max(0, maxStock - existing.quantity);
+            if (availableRemaining <= 0) {
+              triggerStockAlert(
+                `Stock limit reached! Only ${maxStock} units of "${product.name}" available. All ${maxStock} units are already in your cart.`,
+                product.name,
+                maxStock,
+                requestedTotal
+              );
+              return prevCart;
+            }
+
+            triggerStockAlert(
+              `Cannot add ${quantity} more units! Only ${maxStock} units of "${product.name}" in stock (${existing.quantity} in cart). Added remaining ${availableRemaining}.`,
+              product.name,
+              maxStock,
+              requestedTotal
+            );
+
+            const newQty = maxStock;
+            const financials = calculateItemFinancials(
+              existing.unitPrice,
+              newQty,
+              product.gstRate,
+              existing.discountType,
+              existing.discountValue
+            );
+
+            const updated = [...prevCart];
+            updated[existingIndex] = {
+              ...existing,
+              quantity: newQty,
+              taxableAmount: financials.taxableAmount,
+              gstAmount: financials.gstAmount,
+              totalAmount: financials.totalAmount,
+            };
+            return updated;
+          }
+
+          const newQty = requestedTotal;
+          const financials = calculateItemFinancials(
+            existing.unitPrice,
+            newQty,
+            product.gstRate,
+            existing.discountType,
+            existing.discountValue
+          );
+
+          const updated = [...prevCart];
+          updated[existingIndex] = {
+            ...existing,
+            quantity: newQty,
+            taxableAmount: financials.taxableAmount,
+            gstAmount: financials.gstAmount,
+            totalAmount: financials.totalAmount,
+          };
+          return updated;
+        } else {
+          if (quantity > maxStock) {
+            triggerStockAlert(
+              `Cannot select ${quantity} units! Only ${maxStock} in stock for "${product.name}". Added ${maxStock} max units.`,
+              product.name,
+              maxStock,
+              quantity
+            );
+          }
+
+          const allowedQty = Math.min(quantity, maxStock);
+          const financials = calculateItemFinancials(
+            product.unitPrice,
+            allowedQty,
+            product.gstRate,
+            'percent',
+            0
+          );
+
+          const newItem: CartItem = {
+            id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            product,
+            quantity: allowedQty,
+            unitPrice: product.unitPrice,
+            discountType: 'percent',
+            discountValue: 0,
+            taxableAmount: financials.taxableAmount,
+            gstAmount: financials.gstAmount,
+            totalAmount: financials.totalAmount,
+          };
+          return [...prevCart, newItem];
+        }
+      });
+    },
+    [triggerStockAlert]
+  );
+
+  // Remove single item
+  const handleRemoveItem = useCallback((itemId: string) => {
+    setCart((prevCart) => prevCart.filter((item) => item.id !== itemId));
   }, []);
 
-  // Update item quantity
+  // Update item quantity with strict stock limit validation & audio alert
   const handleUpdateQuantity = useCallback(
     (itemId: string, newQty: number) => {
       if (newQty <= 0) {
@@ -484,16 +639,29 @@ export default function App() {
       setCart((prevCart) =>
         prevCart.map((item) => {
           if (item.id === itemId) {
+            const maxStock = typeof item.product.stock === 'number' ? Math.max(0, item.product.stock) : 999;
+            let validatedQty = newQty;
+
+            if (newQty > maxStock) {
+              triggerStockAlert(
+                `Stock limit exceeded! Cannot select ${newQty} units. Only ${maxStock} units of "${item.product.name}" are in stock!`,
+                item.product.name,
+                maxStock,
+                newQty
+              );
+              validatedQty = maxStock;
+            }
+
             const financials = calculateItemFinancials(
               item.unitPrice,
-              newQty,
+              validatedQty,
               item.product.gstRate,
               item.discountType,
               item.discountValue
             );
             return {
               ...item,
-              quantity: newQty,
+              quantity: validatedQty,
               taxableAmount: financials.taxableAmount,
               gstAmount: financials.gstAmount,
               totalAmount: financials.totalAmount,
@@ -503,13 +671,8 @@ export default function App() {
         })
       );
     },
-    [cart]
+    [handleRemoveItem, triggerStockAlert]
   );
-
-  // Remove single item
-  const handleRemoveItem = useCallback((itemId: string) => {
-    setCart((prevCart) => prevCart.filter((item) => item.id !== itemId));
-  }, []);
 
   // Update item discount
   const handleUpdateItemDiscount = useCallback(
@@ -564,7 +727,13 @@ export default function App() {
       itemCount: cart.reduce((acc, it) => acc + it.quantity, 0),
     };
 
-    setHoldCarts((prev) => [newHoldCart, ...prev]);
+    const nextHoldCarts = [newHoldCart, ...holdCarts];
+    setHoldCarts(nextHoldCarts);
+    localStorage.setItem('nexus_pos_hold_carts', JSON.stringify(nextHoldCarts));
+    saveAppDataToSupabase('hold_carts', nextHoldCarts).catch((err) =>
+      console.warn('[Supabase] Hold carts save note:', err)
+    );
+
     posAudio.playScanBeep();
     handleClearCart();
   };
@@ -577,13 +746,25 @@ export default function App() {
     setCart(target.items);
     setSelectedCustomer(target.customer);
     setBillDiscount(target.billDiscount);
-    setHoldCarts((prev) => prev.filter((c) => c.id !== holdCartId));
-    setActiveTab('list');
+
+    const nextHoldCarts = holdCarts.filter((c) => c.id !== holdCartId);
+    setHoldCarts(nextHoldCarts);
+    localStorage.setItem('nexus_pos_hold_carts', JSON.stringify(nextHoldCarts));
+    saveAppDataToSupabase('hold_carts', nextHoldCarts).catch((err) =>
+      console.warn('[Supabase] Hold carts save note:', err)
+    );
+
+    setActiveTab('total');
   };
 
   // Delete held cart
   const handleDeleteHoldCart = (holdCartId: string) => {
-    setHoldCarts((prev) => prev.filter((c) => c.id !== holdCartId));
+    const nextHoldCarts = holdCarts.filter((c) => c.id !== holdCartId);
+    setHoldCarts(nextHoldCarts);
+    localStorage.setItem('nexus_pos_hold_carts', JSON.stringify(nextHoldCarts));
+    saveAppDataToSupabase('hold_carts', nextHoldCarts).catch((err) =>
+      console.warn('[Supabase] Hold carts save note:', err)
+    );
   };
 
   // Save new customer
@@ -824,9 +1005,34 @@ export default function App() {
   }, [cart]);
 
   return (
-    <div id="quickpos-app-root" className="min-h-screen py-4 sm:py-8 px-2 sm:px-4 flex items-center justify-center font-sans">
+    <div id="quickpos-app-root" className="min-h-screen p-0 sm:py-6 sm:px-4 flex items-center justify-center font-sans bg-[#060b16] relative">
+      {/* Floating Stock Alert Toast */}
+      {stockAlert && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-md bg-linear-to-r from-rose-950 via-rose-900 to-amber-950 border-2 border-rose-500 text-white p-3.5 rounded-2xl shadow-2xl flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-4 duration-200">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-rose-600/40 border border-rose-400/60 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-4 h-4 text-rose-300 animate-pulse" />
+            </div>
+            <div className="min-w-0">
+              <h5 className="font-bold text-xs text-rose-200 uppercase tracking-wide font-mono">Stock Limit Alert</h5>
+              <p className="text-xs text-slate-100 font-medium truncate sm:whitespace-normal">
+                {stockAlert.message}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStockAlert(null)}
+            className="p-1 rounded-lg text-rose-300 hover:text-white hover:bg-rose-800/60 transition-colors shrink-0 cursor-pointer"
+            title="Dismiss"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Main Centered Mobile/Compact Card Container matching the Reference UI Screenshot */}
-      <div className="w-full max-w-xl bg-[#0c1427] border border-[#1b2b48] rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+      <div className="w-full sm:max-w-xl bg-[#0c1427] sm:border sm:border-[#1b2b48] sm:rounded-3xl rounded-none border-0 shadow-2xl overflow-hidden flex flex-col min-h-screen sm:min-h-0">
         {/* Top Header */}
         <Navbar
           settings={settings}
@@ -842,7 +1048,7 @@ export default function App() {
           isSyncing={isCloudSyncing}
         />
 
-        {/* 5 Segmented Tabs matching Reference UI */}
+        {/* 4 Segmented Tabs: ADD, TOTAL, PEOPLE, HISTORY */}
         <TabBar
           activeTab={activeTab}
           onTabChange={setActiveTab}
@@ -851,7 +1057,7 @@ export default function App() {
         />
 
         {/* Tab Body View */}
-        <main className="p-4 sm:p-5 flex-1 min-h-[460px] flex flex-col justify-between">
+        <main className="p-3.5 sm:p-5 flex-1 min-h-[460px] flex flex-col justify-between">
           {activeTab === 'add' && (
             <div className="space-y-4 animate-in fade-in duration-200">
               {/* Customer quick select bar */}
@@ -867,6 +1073,7 @@ export default function App() {
               {/* Barcode / QR scanner & Product Catalog */}
               <BarcodeScanner
                 products={products}
+                cart={cart}
                 onAddToCart={(prod, qty) => {
                   handleAddToCart(prod, qty);
                 }}
@@ -882,25 +1089,7 @@ export default function App() {
                 onViewBarcode={handleOpenBarcodeViewer}
                 currencySymbol={settings.currencySymbol}
                 settings={settings}
-              />
-            </div>
-          )}
-
-          {activeTab === 'list' && (
-            <div className="space-y-4 animate-in fade-in duration-200">
-              <CartSummary
-                cart={cart}
-                customer={selectedCustomer}
-                billDiscount={billDiscount}
-                calculation={calculation}
-                currencySymbol={settings.currencySymbol}
-                onUpdateQuantity={handleUpdateQuantity}
-                onRemoveItem={handleRemoveItem}
-                onUpdateItemDiscount={handleUpdateItemDiscount}
-                onUpdateBillDiscount={setBillDiscount}
-                onClearCart={handleClearCart}
-                onHoldCart={handleHoldCart}
-                onProceedToPayment={() => setIsPaymentModalOpen(true)}
+                onStockAlert={(msg) => triggerStockAlert(msg)}
               />
             </div>
           )}
@@ -925,6 +1114,7 @@ export default function App() {
                 onClearCart={handleClearCart}
                 onHoldCart={handleHoldCart}
                 onProceedToPayment={() => setIsPaymentModalOpen(true)}
+                onStockAlert={(msg) => triggerStockAlert(msg)}
               />
             </div>
           )}
@@ -941,105 +1131,243 @@ export default function App() {
                 onSelectCustomer={setSelectedCustomer}
                 customersList={customers}
                 onSaveNewCustomer={handleSaveNewCustomer}
+                onUpdateCustomer={handleUpdateCustomer}
                 onDeleteCustomer={handleDeleteCustomer}
               />
 
               {/* Customers History List */}
               <div className="pt-2">
-                <span className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono block mb-2">
-                  SAVED CUSTOMERS ({customers.length})
-                </span>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono block">
+                    SAVED CUSTOMERS ({customers.length})
+                  </span>
+                  {highestSpenderCustomer && (
+                    <span className="text-[10px] text-amber-400 font-mono font-bold flex items-center gap-1">
+                      <Crown className="w-3 h-3 fill-amber-400/40" /> Top Spender: {highestSpenderCustomer.name}
+                    </span>
+                  )}
+                </div>
+
                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                  {customers.map((c) => (
-                    <div
-                      key={c.id}
-                      onClick={() => setSelectedCustomer(c)}
-                      className="bg-[#0b1325] hover:bg-[#101b33] border border-[#1a2b47] hover:border-blue-500/50 rounded-2xl p-3 flex items-center justify-between cursor-pointer transition-colors group"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center font-mono shrink-0">
-                          {c.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div className="min-w-0">
-                          <h4 className="font-bold text-xs text-slate-100 truncate">{c.name}</h4>
-                          <p className="text-[11px] text-slate-400 font-mono mt-0.5">{c.phone}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3 shrink-0">
-                        <div className="text-right">
-                          <span className="text-[11px] font-mono text-blue-400 font-bold block">
-                            {settings.currencySymbol}
-                            {c.totalSpent}
-                          </span>
-                          <span className="text-[10px] text-slate-500 font-mono">
-                            {c.ordersCount} visits
-                          </span>
-                        </div>
-                        {c.id !== 'walk-in' && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteCustomer(c.id);
-                            }}
-                            title="Delete Customer Details"
-                            className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors"
+                  {customers.map((c) => {
+                    const isTopCustomer = highestSpenderCustomer && c.id === highestSpenderCustomer.id;
+                    return (
+                      <div
+                        key={c.id}
+                        onClick={() => setSelectedCustomer(c)}
+                        className={`border rounded-2xl p-3 flex items-center justify-between cursor-pointer transition-all group ${
+                          isTopCustomer
+                            ? 'bg-linear-to-r from-amber-950/30 via-[#0d1629] to-[#0b1325] border-amber-500/40 hover:border-amber-400/70 shadow-sm shadow-amber-950/20'
+                            : 'bg-[#0b1325] hover:bg-[#101b33] border-[#1a2b47] hover:border-blue-500/50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`w-8 h-8 rounded-full font-bold text-xs flex items-center justify-center font-mono shrink-0 ${
+                              isTopCustomer
+                                ? 'bg-linear-to-tr from-amber-600 to-yellow-400 text-slate-950 ring-2 ring-amber-400/60 shadow-md shadow-amber-500/20'
+                                : 'bg-blue-600 text-white'
+                            }`}
                           >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
+                            {c.name ? c.name.charAt(0).toUpperCase() : 'C'}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-bold text-xs text-slate-100 truncate">{c.name}</h4>
+                              {isTopCustomer && (
+                                <span className="text-[9px] text-amber-300 font-mono font-bold bg-amber-950/80 border border-amber-400/50 px-1.5 py-0.2 rounded-md flex items-center gap-0.5 shadow-xs">
+                                  <Crown className="w-2.5 h-2.5 text-amber-400 fill-amber-400/40" />
+                                  Top Customer
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-400 font-mono mt-0.5">{c.phone}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="text-right mr-1 hidden xs:block">
+                            <span className={`text-[11px] font-mono font-bold block ${
+                              isTopCustomer ? 'text-amber-400' : 'text-blue-400'
+                            }`}>
+                              {settings.currencySymbol}
+                              {c.totalSpent}
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              {c.ordersCount} visits
+                            </span>
+                          </div>
+                          {c.id !== 'walk-in' && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCustomerToEdit(c);
+                                }}
+                                title="Edit Customer Details"
+                                className="p-1.5 text-slate-400 hover:text-blue-400 rounded-lg hover:bg-blue-500/10 transition-colors"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteCustomer(c.id);
+                                }}
+                                title="Delete Customer Details"
+                                className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
           )}
 
           {activeTab === 'history' && (
-            <div className="space-y-4 animate-in fade-in duration-200">
-              <div className="text-center pb-1">
-                <h3 className="font-extrabold text-base text-slate-100">Recent Sales Ledger</h3>
-                <p className="text-xs text-slate-400">View and resend digital receipts</p>
+            <div className="space-y-3.5 animate-in fade-in duration-200">
+              {/* Daily Sale Stat Banner */}
+              <div className="bg-linear-to-br from-blue-950/70 via-[#0d1c38] to-[#071124] border border-blue-500/40 rounded-2xl p-3 shadow-md">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-blue-300 font-mono flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-blue-400" />
+                    TODAY'S DAILY SALE
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {new Date().toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-baseline justify-between">
+                  <div className="text-xl font-black text-slate-100 font-mono">
+                    {settings.currencySymbol}
+                    {todaySalesMetrics.total.toFixed(2)}
+                  </div>
+                  <div className="text-xs font-mono text-blue-300 font-bold bg-blue-600/30 px-2.5 py-0.5 rounded-lg border border-blue-400/30">
+                    {todaySalesMetrics.count} {todaySalesMetrics.count === 1 ? 'Bill' : 'Bills'} Today
+                  </div>
+                </div>
               </div>
 
-              <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
-                {invoices.length > 0 ? (
-                  invoices.map((inv) => (
-                    <div
-                      key={inv.id}
-                      onClick={() => {
-                        setCurrentInvoice(inv);
-                        setIsInvoiceModalOpen(true);
-                      }}
-                      className="bg-[#0b1325] hover:bg-[#101b33] border border-[#1a2b47] hover:border-blue-500/50 rounded-2xl p-3 flex items-center justify-between cursor-pointer transition-colors"
+              {/* Time Range Filter & Sort Controls */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-1 bg-[#090f1d] p-1 rounded-xl border border-[#1b2b48] text-xs">
+                  {(['today', 'weekly', 'monthly', 'yearly', 'all'] as const).map((period) => (
+                    <button
+                      key={period}
+                      type="button"
+                      onClick={() => setHistoryTabRange(period)}
+                      className={`flex-1 py-1 px-1.5 rounded-lg text-[11px] font-bold capitalize transition-all cursor-pointer ${
+                        historyTabRange === period
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-400 hover:text-slate-200 hover:bg-[#13223f]'
+                      }`}
                     >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-xs font-mono text-blue-400">
-                            #{inv.invoiceNumber}
-                          </span>
-                          <span className="text-xs font-medium text-slate-200">
-                            {inv.customer.name}
-                          </span>
+                      {period === 'all' ? 'All Time' : period}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-slate-400 font-mono uppercase">Sort:</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setHistoryTabSort(
+                          historyTabSort === 'date-desc' ? 'amount-desc' : 'date-desc'
+                        )
+                      }
+                      className="px-2 py-1 bg-[#090f1d] hover:bg-[#121f3b] border border-[#1b2b48] rounded-lg text-[10px] font-mono font-bold text-slate-300 flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <ArrowUpDown className="w-3 h-3 text-blue-400" />
+                      {historyTabSort === 'date-desc' ? 'Time (Newest)' : 'Amount (Highest)'}
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsSalesHistoryModalOpen(true)}
+                    className="px-2.5 py-1 bg-[#12203d] hover:bg-blue-600 text-blue-300 hover:text-white rounded-lg text-[10px] font-bold font-mono flex items-center gap-1 border border-blue-500/30 transition-all cursor-pointer"
+                  >
+                    <ExternalLink className="w-3 h-3" /> Full Ledger
+                  </button>
+                </div>
+              </div>
+
+              {/* Invoices List */}
+              <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+                {filteredHistoryInvoices.length > 0 ? (
+                  filteredHistoryInvoices.map((inv) => {
+                    const invDate = new Date(inv.timestamp);
+                    const isToday =
+                      invDate.toDateString() === new Date().toDateString();
+
+                    return (
+                      <div
+                        key={inv.id}
+                        onClick={() => {
+                          setCurrentInvoice(inv);
+                          setIsInvoiceModalOpen(true);
+                        }}
+                        className="bg-[#0b1325] hover:bg-[#101b33] border border-[#1a2b47] hover:border-blue-500/50 rounded-2xl p-3 flex items-center justify-between cursor-pointer transition-colors group"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-xs font-mono text-blue-400">
+                              #{inv.invoiceNumber}
+                            </span>
+                            <span className="text-xs font-medium text-slate-200 truncate">
+                              {inv.customer.name}
+                            </span>
+                            {isToday && (
+                              <span className="px-1 py-0.2 bg-emerald-500/20 text-emerald-400 text-[9px] font-mono font-bold rounded">
+                                TODAY
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-400 font-mono mt-0.5 flex items-center gap-2">
+                            <span>
+                              {invDate.toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                            <span>•</span>
+                            <span className="uppercase">{inv.paymentMethod}</span>
+                            <span>•</span>
+                            <span>{inv.items.length} items</span>
+                          </div>
                         </div>
-                        <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                          {new Date(inv.timestamp).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}{' '}
-                          • <span className="uppercase">{inv.paymentMethod}</span>
+                        <div className="text-right shrink-0">
+                          <span className="font-bold text-xs font-mono text-slate-100 block">
+                            {settings.currencySymbol}
+                            {inv.grandTotal.toFixed(2)}
+                          </span>
+                          <span className="text-[10px] text-blue-400 font-semibold group-hover:underline">
+                            View Receipt &rarr;
+                          </span>
                         </div>
                       </div>
-                      <span className="font-bold text-xs font-mono text-slate-100">
-                        {settings.currencySymbol}
-                        {inv.grandTotal.toFixed(2)}
-                      </span>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
-                  <div className="py-12 text-center text-slate-500 text-xs">
-                    No sales recorded yet.
+                  <div className="py-10 text-center text-slate-500 text-xs bg-[#090f1d] rounded-2xl border border-[#1b2b48]">
+                    <p className="font-semibold text-slate-400">No sales recorded for this period</p>
+                    <button
+                      type="button"
+                      onClick={() => setHistoryTabRange('all')}
+                      className="mt-2 text-blue-400 hover:underline text-[11px] font-bold"
+                    >
+                      Show All Time Invoices
+                    </button>
                   </div>
                 )}
               </div>
@@ -1165,7 +1493,18 @@ export default function App() {
         currencySymbol={settings.currencySymbol}
       />
 
-      {/* 10. Customer Interactive Online Payment Portal (for ?pay=INV-...&amt=120) */}
+      {/* 10. Edit Customer Profile Modal */}
+      <EditCustomerModal
+        isOpen={Boolean(customerToEdit)}
+        onClose={() => setCustomerToEdit(null)}
+        customer={customerToEdit}
+        onSave={(updated) => {
+          handleUpdateCustomer(updated);
+          setCustomerToEdit(null);
+        }}
+      />
+
+      {/* 11. Customer Interactive Online Payment Portal (for ?pay=INV-...&amt=120) */}
       {customerPaymentData && (
         <CustomerPaymentPortal
           invoiceNumber={customerPaymentData.invoiceNumber}

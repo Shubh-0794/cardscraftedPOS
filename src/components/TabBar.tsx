@@ -1,7 +1,7 @@
 import React from 'react';
 import { Plus, List, IndianRupee, Users, History } from 'lucide-react';
 
-export type ActiveTab = 'add' | 'list' | 'total' | 'people' | 'history';
+export type ActiveTab = 'add' | 'total' | 'people' | 'history';
 
 interface TabBarProps {
   activeTab: ActiveTab;
@@ -18,8 +18,7 @@ export const TabBar: React.FC<TabBarProps> = ({
 }) => {
   const tabs = [
     { id: 'add' as ActiveTab, label: 'ADD', icon: Plus },
-    { id: 'list' as ActiveTab, label: 'LIST', icon: List, badge: cartItemCount },
-    { id: 'total' as ActiveTab, label: 'TOTAL', icon: IndianRupee },
+    { id: 'total' as ActiveTab, label: 'TOTAL', icon: IndianRupee, badge: cartItemCount },
     { id: 'people' as ActiveTab, label: 'PEOPLE', icon: Users, dot: customerSelected },
     { id: 'history' as ActiveTab, label: 'HISTORY', icon: History },
   ];

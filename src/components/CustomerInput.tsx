@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Customer } from '../types/pos';
-import { Plus, X, Trash2, Edit2, Check, Mail, Phone, User, Award, DollarSign } from 'lucide-react';
+import { Plus, X, Trash2, Edit2, Check, Mail, Phone, User, Award, DollarSign, Crown } from 'lucide-react';
 
 interface CustomerInputProps {
   customer: Customer | null;
@@ -39,6 +39,18 @@ export const CustomerInput: React.FC<CustomerInputProps> = ({
   const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Identify customer with the highest purchase amount from us
+  const highestSpender = useMemo(() => {
+    const eligible = customersList.filter(
+      (c) => c.id !== 'walk-in' && (c.totalSpent || 0) > 0
+    );
+    if (eligible.length === 0) return null;
+    return eligible.reduce(
+      (prev, curr) => ((curr.totalSpent || 0) > (prev.totalSpent || 0) ? curr : prev),
+      eligible[0]
+    );
+  }, [customersList]);
 
   const filteredCustomers = customersList.filter((c) => {
     const q = searchQuery.toLowerCase();
@@ -135,12 +147,22 @@ export const CustomerInput: React.FC<CustomerInputProps> = ({
         // Selected Customer Card matching Reference UI
         <div className="bg-[#0a101d] border border-blue-500/40 rounded-xl px-4 py-2.5 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center font-mono shrink-0">
+            <div className={`w-8 h-8 rounded-full font-bold text-xs flex items-center justify-center font-mono shrink-0 ${
+              highestSpender && customer.id === highestSpender.id
+                ? 'bg-linear-to-tr from-amber-600 to-yellow-400 text-slate-950 ring-2 ring-amber-400/60 shadow-md shadow-amber-500/20'
+                : 'bg-blue-600 text-white'
+            }`}>
               {customer.name ? customer.name.charAt(0).toUpperCase() : 'C'}
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-bold text-xs text-slate-100 truncate">{customer.name}</span>
+                {highestSpender && customer.id === highestSpender.id && (
+                  <span className="text-[10px] text-amber-300 font-mono font-bold bg-amber-950/80 border border-amber-400/50 px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-xs">
+                    <Crown className="w-3 h-3 text-amber-400 fill-amber-400/40" />
+                    Top Customer
+                  </span>
+                )}
                 <span className="text-[10px] text-emerald-400 font-mono font-bold bg-emerald-950/60 border border-emerald-500/30 px-1.5 py-0.2 rounded-md">
                   LINKED
                 </span>
@@ -153,6 +175,9 @@ export const CustomerInput: React.FC<CustomerInputProps> = ({
               <p className="text-[11px] text-slate-400 font-mono mt-0.5 flex items-center gap-2">
                 <span>{customer.countryCode} {customer.phone}</span>
                 {customer.email && <span className="text-slate-500 truncate max-w-[120px]">({customer.email})</span>}
+                {customer.totalSpent > 0 && (
+                  <span className="text-blue-400 font-bold">₹{customer.totalSpent.toLocaleString()}</span>
+                )}
               </p>
             </div>
           </div>
@@ -233,12 +258,22 @@ export const CustomerInput: React.FC<CustomerInputProps> = ({
                     className="w-full px-4 py-2.5 text-left hover:bg-[#121e38] flex items-center justify-between text-xs transition-colors cursor-pointer group"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-7 h-7 rounded-full bg-[#1b2d52] text-blue-400 font-bold text-xs flex items-center justify-center font-mono shrink-0">
+                      <div className={`w-7 h-7 rounded-full font-bold text-xs flex items-center justify-center font-mono shrink-0 ${
+                        highestSpender && c.id === highestSpender.id
+                          ? 'bg-linear-to-tr from-amber-600 to-yellow-400 text-slate-950 ring-2 ring-amber-400/50'
+                          : 'bg-[#1b2d52] text-blue-400'
+                      }`}>
                         {c.name ? c.name.charAt(0).toUpperCase() : 'C'}
                       </div>
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-slate-100 truncate block">{c.name}</span>
+                          {highestSpender && c.id === highestSpender.id && (
+                            <span className="text-[9px] text-amber-300 font-mono font-bold bg-amber-950/70 border border-amber-400/40 px-1.5 py-0.2 rounded flex items-center gap-0.5">
+                              <Crown className="w-2.5 h-2.5 text-amber-400 fill-amber-400/30" />
+                              Top Customer
+                            </span>
+                          )}
                           {c.loyaltyPoints > 0 && (
                             <span className="text-[10px] text-amber-400 font-mono font-bold bg-amber-950/40 px-1 py-0.2 rounded border border-amber-500/20">
                               {c.loyaltyPoints} pts
@@ -249,7 +284,7 @@ export const CustomerInput: React.FC<CustomerInputProps> = ({
                           <span>{c.phone}</span>
                           {c.email && <span className="text-slate-500 truncate max-w-[120px]">({c.email})</span>}
                           {c.totalSpent > 0 && (
-                            <span className="text-slate-500">₹{c.totalSpent.toLocaleString()}</span>
+                            <span className="text-slate-400">₹{c.totalSpent.toLocaleString()}</span>
                           )}
                         </div>
                       </div>

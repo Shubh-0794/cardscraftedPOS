@@ -137,11 +137,11 @@ export const QrCodeViewerModal: React.FC<QrCodeViewerModalProps> = ({
       ctx.textAlign = 'center';
       ctx.fillText(`CODE: ${rawCode}`, size / 2, qrTop + qrBoxSize + 60);
 
-      // Price Banner at bottom
+      // Selling Price Banner at bottom
       if (typeof data.price === 'number') {
         ctx.fillStyle = '#2563eb';
-        ctx.font = 'bold 56px "Plus Jakarta Sans", sans-serif';
-        const priceStr = `PRICE: ${currencySymbol}${data.price.toFixed(2)}`;
+        ctx.font = 'bold 54px "Plus Jakarta Sans", sans-serif';
+        const priceStr = `Selling Price: ₹ ${data.price.toFixed(2)}`;
         ctx.fillText(priceStr, size / 2, qrTop + qrBoxSize + 140);
       }
 

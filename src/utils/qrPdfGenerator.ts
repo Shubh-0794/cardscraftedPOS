@@ -4,6 +4,47 @@ import { Product, Invoice, StoreSettings } from '../types/pos';
 import { formatCurrency } from './taxCalculator';
 
 /**
+ * Creates a crisp, high-DPI image for the Selling Price badge
+ * to cleanly render the Indian Rupee (₹) symbol without jsPDF font corruption.
+ */
+function renderPriceBadgeDataUrl(amount: number, label: string = 'Selling Price'): string {
+  try {
+    if (typeof document === 'undefined') return '';
+    const canvas = document.createElement('canvas');
+    canvas.width = 420;
+    canvas.height = 74;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+
+    // Background rounded pill
+    ctx.fillStyle = '#eef2ff'; // indigo-50
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(2, 2, canvas.width - 4, canvas.height - 4, 16);
+    } else {
+      ctx.rect(2, 2, canvas.width - 4, canvas.height - 4);
+    }
+    ctx.fill();
+
+    // Border
+    ctx.strokeStyle = '#c7d2fe'; // indigo-200
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    // Text: Selling Price: ₹ 450.00
+    ctx.fillStyle = '#1d4ed8'; // blue-700
+    ctx.font = 'bold 26px "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.textBaseline = 'middle';
+    const text = `${label}: ₹ ${amount.toFixed(2)}`;
+    ctx.fillText(text, 16, canvas.height / 2);
+
+    return canvas.toDataURL('image/png');
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Generates an A4 PDF containing QR sticker labels
  * Grid: 3 columns × 8 rows (Max 24 labels per page, exact count, no repeat)
  */
@@ -137,15 +178,21 @@ export async function generate24QrLabelsA4Pdf(
       doc.text(doc.splitTextToSize(skuCat, maxTitleWidth)[0] || '', textX, textY);
       textY += 3.6;
 
-      // Selling Price Highlight Pill
-      doc.setFillColor(238, 242, 255); // indigo-50
-      doc.roundedRect(textX - 0.5, textY - 2.5, maxTitleWidth + 1, 6.2, 1, 1, 'F');
+      // Selling Price Highlight Pill with authentic Rupee (₹) symbol
+      const priceBadgeUrl = renderPriceBadgeDataUrl(product.unitPrice, 'Selling Price');
+      const badgeW = maxTitleWidth + 1;
+      const badgeH = 6.4;
 
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(29, 78, 216); // blue-700
-      const priceText = `MRP ${formatCurrency(product.unitPrice, settings.currencySymbol)}`;
-      doc.text(priceText, textX + 1, textY + 1.8);
+      if (priceBadgeUrl) {
+        doc.addImage(priceBadgeUrl, 'PNG', textX - 0.5, textY - 2.5, badgeW, badgeH);
+      } else {
+        doc.setFillColor(238, 242, 255); // indigo-50
+        doc.roundedRect(textX - 0.5, textY - 2.5, badgeW, badgeH, 1, 1, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(29, 78, 216); // blue-700
+        doc.text(`Selling Price: Rs. ${product.unitPrice.toFixed(2)}`, textX + 1, textY + 1.8);
+      }
     }
 
     // Page footer note

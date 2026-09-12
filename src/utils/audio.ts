@@ -117,6 +117,41 @@ class POSAudioEngine {
   }
 
   /**
+   * Urgent warning siren/beep when requested quantity exceeds available stock
+   */
+  public playStockAlertSound() {
+    if (!this.enabled) return;
+    try {
+      const ctx = this.getContext();
+      if (!ctx) return;
+
+      const playBuzzPulse = (startTime: number, freq1: number, freq2: number, duration: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq1, ctx.currentTime + startTime);
+        osc.frequency.linearRampToValueAtTime(freq2, ctx.currentTime + startTime + duration);
+
+        gain.gain.setValueAtTime(0.3, ctx.currentTime + startTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startTime + duration);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(ctx.currentTime + startTime);
+        osc.stop(ctx.currentTime + startTime + duration);
+      };
+
+      // Double urgent beep alert
+      playBuzzPulse(0.0, 750, 320, 0.14);
+      playBuzzPulse(0.18, 750, 320, 0.18);
+    } catch {
+      // ignore audio errors
+    }
+  }
+
+  /**
    * Cash drawer pop click sound
    */
   public playCashSound() {
