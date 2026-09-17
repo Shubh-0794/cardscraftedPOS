@@ -17,6 +17,10 @@ import {
   QrCode,
   Banknote,
   AlertTriangle,
+  User,
+  Phone,
+  MessageCircle,
+  FileText,
 } from 'lucide-react';
 
 interface CartSummaryProps {
@@ -31,8 +35,10 @@ interface CartSummaryProps {
   onUpdateBillDiscount: (discount: BillDiscount) => void;
   onClearCart: () => void;
   onHoldCart: () => void;
-  onProceedToPayment: () => void;
+  onProceedToPayment: (selectedMode?: PaymentMethod) => void;
   onStockAlert?: (msg: string) => void;
+  onSelectCustomer?: (customer: Customer | null) => void;
+  onSaveNewCustomer?: (newCustomer: Customer) => void;
 }
 
 const AVATAR_COLORS = [
@@ -58,10 +64,18 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
   onHoldCart,
   onProceedToPayment,
   onStockAlert,
+  onSelectCustomer,
+  onSaveNewCustomer,
 }) => {
   const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentMethod>('upi');
   const [showDiscountInput, setShowDiscountInput] = useState(false);
   const [discountVal, setDiscountVal] = useState(billDiscount.value || '');
+
+  // Quick Customer WhatsApp input states in TOTAL view
+  const [quickPhone, setQuickPhone] = useState(customer?.phone || '');
+  const [quickName, setQuickName] = useState(customer?.name || '');
+  const [countryCode, setCountryCode] = useState(customer?.countryCode || '+91');
+  const [isEditingCustomerPhone, setIsEditingCustomerPhone] = useState(false);
 
   const totalItemCount = cart.reduce((acc, item) => acc + item.quantity, 0);
 
@@ -71,6 +85,43 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
       value: Math.min(100, Math.max(0, val)),
       reason: 'Special Discount',
     });
+  };
+
+  const handleSaveQuickCustomer = () => {
+    const clean = quickPhone.replace(/\D/g, '');
+    if (!clean) return;
+
+    const newCust: Customer = {
+      id: customer?.id && customer.id !== 'walk-in' ? customer.id : `cust-${Date.now()}`,
+      name: quickName.trim() || `Customer (${clean.slice(-4)})`,
+      phone: clean,
+      countryCode: countryCode || '+91',
+      loyaltyPoints: customer?.loyaltyPoints || 0,
+      totalSpent: customer?.totalSpent || 0,
+      ordersCount: customer?.ordersCount || 0,
+    };
+
+    onSaveNewCustomer?.(newCust);
+    onSelectCustomer?.(newCust);
+    setIsEditingCustomerPhone(false);
+  };
+
+  const handleProceed = () => {
+    if (quickPhone && (!customer || customer.phone !== quickPhone.replace(/\D/g, ''))) {
+      const clean = quickPhone.replace(/\D/g, '');
+      const newCust: Customer = {
+        id: customer?.id && customer.id !== 'walk-in' ? customer.id : `cust-${Date.now()}`,
+        name: quickName.trim() || `Customer (${clean.slice(-4)})`,
+        phone: clean,
+        countryCode: countryCode || '+91',
+        loyaltyPoints: customer?.loyaltyPoints || 0,
+        totalSpent: customer?.totalSpent || 0,
+        ordersCount: customer?.ordersCount || 0,
+      };
+      onSaveNewCustomer?.(newCust);
+      onSelectCustomer?.(newCust);
+    }
+    onProceedToPayment(selectedPaymentMode);
   };
 
   return (
@@ -308,6 +359,83 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
         </div>
       </div>
 
+      {/* CUSTOMER WHATSAPP DETAILS SECTION */}
+      <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl px-4 pt-2.5 pb-3">
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="text-[10px] font-extrabold text-emerald-400 tracking-wider uppercase font-mono flex items-center gap-1.5">
+            <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
+            <span>CUSTOMER WHATSAPP (FOR PDF INVOICE)</span>
+          </label>
+          {customer && (
+            <button
+              type="button"
+              onClick={() => setIsEditingCustomerPhone(!isEditingCustomerPhone)}
+              className="text-[10px] text-blue-400 hover:text-blue-300 font-mono font-bold"
+            >
+              {isEditingCustomerPhone ? 'Done' : 'Edit Number'}
+            </button>
+          )}
+        </div>
+
+        {customer && !isEditingCustomerPhone ? (
+          <div className="flex items-center justify-between bg-[#0e172a] border border-emerald-500/30 rounded-lg p-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-7 h-7 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center font-mono shrink-0">
+                {customer.name ? customer.name.charAt(0).toUpperCase() : 'C'}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-100 truncate">{customer.name}</p>
+                <p className="text-[11px] text-emerald-400 font-mono font-semibold flex items-center gap-1">
+                  <Phone className="w-3 h-3 text-emerald-400" />
+                  {customer.countryCode || '+91'} {customer.phone}
+                </p>
+              </div>
+            </div>
+            <span className="text-[10px] bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 px-2 py-0.5 rounded-md font-mono font-bold shrink-0">
+              PDF Target
+            </span>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="relative">
+                <input
+                  type="tel"
+                  placeholder="Customer WhatsApp (10 digits)"
+                  value={quickPhone}
+                  onChange={(e) => setQuickPhone(e.target.value)}
+                  className="w-full bg-[#0e172a] border border-[#1b2b48] focus:border-emerald-500 rounded-lg px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none placeholder:text-slate-500"
+                />
+              </div>
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Customer Name (Optional)"
+                  value={quickName}
+                  onChange={(e) => setQuickName(e.target.value)}
+                  className="w-full bg-[#0e172a] border border-[#1b2b48] focus:border-blue-500 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none placeholder:text-slate-500"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-slate-400">
+              <span className="flex items-center gap-1 text-emerald-400 font-medium">
+                <FileText className="w-3 h-3" />
+                PDF invoice will be sent directly to this WhatsApp
+              </span>
+              {quickPhone && (
+                <button
+                  type="button"
+                  onClick={handleSaveQuickCustomer}
+                  className="text-emerald-400 hover:text-emerald-300 font-bold font-mono underline"
+                >
+                  Save to Bill
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* WHO PAID? / PAYMENT MODE Selector Box matching Reference Image */}
       <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl px-4 pt-2.5 pb-2">
         <label className="block text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono mb-1">
@@ -360,7 +488,7 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
         id="btn-proceed-to-payment"
         type="button"
         disabled={cart.length === 0}
-        onClick={onProceedToPayment}
+        onClick={handleProceed}
         className={`w-full py-3.5 px-4 rounded-2xl text-sm font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg ${
           cart.length > 0
             ? 'bg-blue-600 hover:bg-blue-500 text-white cursor-pointer active:scale-[0.99] shadow-blue-900/40'

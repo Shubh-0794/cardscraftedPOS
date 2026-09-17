@@ -1,7 +1,8 @@
 import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
-import { Product, Invoice, StoreSettings } from '../types/pos';
+import { Product, Invoice, StoreSettings, PreOrder } from '../types/pos';
 import { formatCurrency } from './taxCalculator';
+import { buildUPIDeepLink } from './upi';
 
 /**
  * Creates a crisp, high-DPI image for the Selling Price badge
@@ -442,3 +443,311 @@ export async function generateInvoicePdf(
   doc.save(filename);
   return blob;
 }
+
+/**
+ * Builds a high-fidelity 80mm Pre-Order Booking Slip PDF
+ */
+export async function buildPreOrderSlipPdfDoc(
+  preOrder: PreOrder,
+  settings: StoreSettings
+): Promise<jsPDF> {
+  const pageWidth = 80;
+  // Calculate dynamic page height based on optional sections
+  let calculatedHeight = 175;
+  if (preOrder.notes) calculatedHeight += 12;
+  if (preOrder.expectedDeliveryDate) calculatedHeight += 8;
+  if (preOrder.balanceDue > 0 && settings.upiId) calculatedHeight += 45;
+
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: [pageWidth, Math.max(180, calculatedHeight)],
+  });
+
+  let curY = 6;
+  const symbol = settings.currencySymbol || 'Rs.';
+
+  // Top Store Branding
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42); // slate-900
+  const storeName = (settings.storeName || 'Cardcrafted').toUpperCase();
+  doc.text(storeName, pageWidth / 2, curY, { align: 'center' });
+  curY += 4;
+
+  if (settings.tagline) {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(7);
+    doc.setTextColor(71, 85, 105);
+    doc.text(settings.tagline, pageWidth / 2, curY, { align: 'center' });
+    curY += 3.5;
+  }
+
+  if (settings.address) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    const addr = `${settings.address}${settings.city ? `, ${settings.city}` : ''}`;
+    const splitAddr = doc.splitTextToSize(addr, 70);
+    doc.text(splitAddr, pageWidth / 2, curY, { align: 'center' });
+    curY += splitAddr.length * 3;
+  }
+
+  if (settings.phone) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Phone: ${settings.phone}`, pageWidth / 2, curY, { align: 'center' });
+    curY += 3.2;
+  }
+
+  if (settings.gstin) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`GSTIN: ${settings.gstin}`, pageWidth / 2, curY, { align: 'center' });
+    curY += 3.2;
+  }
+
+  curY += 1.5;
+
+  // Title Banner Badge
+  doc.setFillColor(15, 23, 42);
+  doc.roundedRect(5, curY, pageWidth - 10, 6, 1.5, 1.5, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(255, 255, 255);
+  doc.text('PRE-ORDER BOOKING SLIP', pageWidth / 2, curY + 4.2, { align: 'center' });
+  curY += 8.5;
+
+  // Order Meta Info
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Pre-Order No: #${preOrder.orderNumber}`, 5, curY);
+
+  const bookingDate = new Date(preOrder.timestamp).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Date: ${bookingDate}`, pageWidth - 5, curY, { align: 'right' });
+  curY += 3.8;
+
+  if (preOrder.expectedDeliveryDate) {
+    doc.setFillColor(239, 246, 255); // blue-50
+    doc.roundedRect(5, curY, pageWidth - 10, 5, 1, 1, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(29, 78, 216); // blue-700
+    doc.text(`EXPECTED DELIVERY: ${preOrder.expectedDeliveryDate}`, 7, curY + 3.5);
+    curY += 6.5;
+  }
+
+  // Customer Info
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(71, 85, 105);
+  doc.text('CUSTOMER DETAILS:', 5, curY);
+  curY += 3.2;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(15, 23, 42);
+  const custName = preOrder.customerName || 'Walk-in Customer';
+  const custPhone = preOrder.customerPhone ? ` (${preOrder.customerPhone})` : '';
+  doc.text(`${custName}${custPhone}`, 5, curY);
+  curY += 4;
+
+  // Dashed Divider
+  doc.setLineDashPattern([1, 1], 0);
+  doc.setDrawColor(203, 213, 225);
+  doc.line(5, curY, pageWidth - 5, curY);
+  curY += 3.5;
+
+  // Order Item Header
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(71, 85, 105);
+  doc.text('ITEM SPECIFICATION', 5, curY);
+  doc.text('TOTAL', pageWidth - 5, curY, { align: 'right' });
+  curY += 3.5;
+
+  // Product Name
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(15, 23, 42);
+  const splitProdName = doc.splitTextToSize(preOrder.productName, 52);
+  doc.text(splitProdName, 5, curY);
+
+  const itemTotalText = formatCurrency(preOrder.totalPrice, settings.currencySymbol);
+  doc.text(itemTotalText, pageWidth - 5, curY, { align: 'right' });
+  curY += splitProdName.length * 3.5;
+
+  // Qty & Unit Rate
+  doc.setFont('courier', 'normal');
+  doc.setFontSize(6.8);
+  doc.setTextColor(100, 116, 139);
+  const unitRateText = `${preOrder.quantity} Qty × ${formatCurrency(preOrder.unitPrice, settings.currencySymbol)}`;
+  doc.text(unitRateText, 5, curY);
+  curY += 3.8;
+
+  if (preOrder.notes) {
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(5, curY, pageWidth - 10, 6, 1, 1, 'F');
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(6);
+    doc.setTextColor(71, 85, 105);
+    const splitNotes = doc.splitTextToSize(`Notes: ${preOrder.notes}`, 68);
+    doc.text(splitNotes, 7, curY + 3.8);
+    curY += Math.max(7, splitNotes.length * 3 + 3);
+  }
+
+  // Dashed Divider
+  doc.line(5, curY, pageWidth - 5, curY);
+  curY += 4;
+
+  // Financial Ledger Breakdown
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text('Total Order Price:', 5, curY);
+  doc.text(formatCurrency(preOrder.totalPrice, settings.currencySymbol), pageWidth - 5, curY, { align: 'right' });
+  curY += 3.8;
+
+  doc.setTextColor(16, 185, 129); // emerald-600
+  doc.setFont('helvetica', 'bold');
+  doc.text('Advance Paid (Received):', 5, curY);
+  doc.text(`-${formatCurrency(preOrder.advancePayment, settings.currencySymbol)}`, pageWidth - 5, curY, { align: 'right' });
+  curY += 4.5;
+
+  // Balance Due (Prominent Highlight Box)
+  doc.setLineDashPattern([], 0);
+  if (preOrder.balanceDue <= 0) {
+    doc.setFillColor(236, 253, 245); // emerald-50
+    doc.setDrawColor(16, 185, 129);
+  } else {
+    doc.setFillColor(254, 243, 199); // amber-100
+    doc.setDrawColor(217, 119, 6);
+  }
+  doc.setLineWidth(0.3);
+  doc.roundedRect(5, curY, pageWidth - 10, 8, 1.5, 1.5, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(15, 23, 42);
+  doc.text('REMAINING BALANCE DUE:', 8, curY + 5.2);
+
+  doc.setFontSize(9.5);
+  if (preOrder.balanceDue <= 0) {
+    doc.setTextColor(5, 150, 105);
+    doc.text('PAID IN FULL', pageWidth - 8, curY + 5.2, { align: 'right' });
+  } else {
+    doc.setTextColor(180, 83, 9);
+    doc.text(formatCurrency(preOrder.balanceDue, settings.currencySymbol), pageWidth - 8, curY + 5.2, { align: 'right' });
+  }
+  curY += 11;
+
+  // Status Stamp Text
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.8);
+  if (preOrder.status === 'completed') {
+    doc.setTextColor(5, 150, 105);
+    doc.text('STATUS: ORDER COMPLETED & DELIVERED', pageWidth / 2, curY, { align: 'center' });
+  } else if (preOrder.status === 'cancelled') {
+    doc.setTextColor(225, 29, 72);
+    doc.text('STATUS: ORDER CANCELLED', pageWidth / 2, curY, { align: 'center' });
+  } else {
+    doc.setTextColor(180, 83, 9);
+    doc.text('STATUS: ADVANCE RECEIVED (BALANCE PENDING)', pageWidth / 2, curY, { align: 'center' });
+  }
+  curY += 4.5;
+
+  // Dynamic UPI QR Code for Paying Balance (if balance > 0 and UPI ID is configured)
+  if (preOrder.balanceDue > 0 && settings.upiId) {
+    try {
+      const upiLink = buildUPIDeepLink({
+        upiId: settings.upiId,
+        payeeName: settings.upiPayeeName || settings.storeName,
+        amount: preOrder.balanceDue,
+        currency: settings.currencyCode || 'INR',
+        transactionNote: `Balance for Pre-Order #${preOrder.orderNumber}`,
+        transactionRef: `PRE${preOrder.orderNumber.replace(/\D/g, '')}`,
+      });
+
+      const qrDataUrl = await QRCode.toDataURL(upiLink, {
+        width: 180,
+        margin: 1,
+        color: { dark: '#0a0f1d', light: '#ffffff' },
+        errorCorrectionLevel: 'M',
+      });
+
+      const qrSize = 25;
+      doc.addImage(qrDataUrl, 'PNG', (pageWidth - qrSize) / 2, curY, qrSize, qrSize);
+      curY += qrSize + 3;
+
+      doc.setFont('courier', 'bold');
+      doc.setFontSize(6.5);
+      doc.setTextColor(71, 85, 105);
+      doc.text('SCAN TO PAY BALANCE VIA UPI', pageWidth / 2, curY, { align: 'center' });
+      curY += 3;
+
+      doc.setFont('courier', 'normal');
+      doc.setFontSize(6);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`UPI ID: ${settings.upiId}`, pageWidth / 2, curY, { align: 'center' });
+      curY += 4;
+    } catch (qrErr) {
+      console.warn('Failed to render UPI QR in PDF slip:', qrErr);
+    }
+  }
+
+  // Footer note
+  doc.setLineDashPattern([1, 1], 0);
+  doc.setDrawColor(203, 213, 225);
+  doc.line(5, curY, pageWidth - 5, curY);
+  curY += 3.5;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.2);
+  doc.setTextColor(100, 116, 139);
+  const footerNote = settings.invoiceFooterNote || 'Thank you for your pre-order with us!';
+  const splitFooter = doc.splitTextToSize(footerNote, 70);
+  doc.text(splitFooter, pageWidth / 2, curY, { align: 'center' });
+  curY += splitFooter.length * 2.8 + 1;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6);
+  doc.setTextColor(71, 85, 105);
+  doc.text('Please present this booking slip when collecting your order.', pageWidth / 2, curY, { align: 'center' });
+
+  return doc;
+}
+
+/**
+ * Creates Blob and File objects for Pre-Order PDF slip
+ */
+export async function createPreOrderPdfBlob(
+  preOrder: PreOrder,
+  settings: StoreSettings
+): Promise<{ doc: jsPDF; blob: Blob; file: File; filename: string }> {
+  const doc = await buildPreOrderSlipPdfDoc(preOrder, settings);
+  const filename = `PreOrder_Slip_${preOrder.orderNumber}.pdf`;
+  const blob = doc.output('blob');
+  const file = new File([blob], filename, { type: 'application/pdf' });
+  return { doc, blob, file, filename };
+}
+
+/**
+ * Generates and downloads the Pre-Order PDF slip
+ */
+export async function generatePreOrderPdf(
+  preOrder: PreOrder,
+  settings: StoreSettings
+): Promise<Blob> {
+  const { doc, blob, filename } = await createPreOrderPdfBlob(preOrder, settings);
+  doc.save(filename);
+  return blob;
+}
+

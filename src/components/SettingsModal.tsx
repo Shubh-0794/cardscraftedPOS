@@ -18,6 +18,7 @@ import {
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
   SUPABASE_SQL_SCHEMA,
+  SUPABASE_PRE_ORDERS_SQL_SCHEMA,
   runSupabaseDiagnostics,
   updateSupabaseCredentials,
   SupabaseDiagnosticResult,
@@ -31,6 +32,7 @@ interface SettingsModalProps {
   productsCount?: number;
   customersCount?: number;
   invoicesCount?: number;
+  preOrdersCount?: number;
   onSyncAllToCloud?: () => Promise<boolean>;
   onPullAllFromCloud?: () => Promise<boolean>;
   isSyncing?: boolean;
@@ -44,6 +46,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   productsCount = 0,
   customersCount = 0,
   invoicesCount = 0,
+  preOrdersCount = 0,
   onSyncAllToCloud,
   onPullAllFromCloud,
   isSyncing = false,
@@ -57,6 +60,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [customKey, setCustomKey] = useState(SUPABASE_ANON_KEY);
   const [showConfigFields, setShowConfigFields] = useState(false);
   const [configSavedNotice, setConfigSavedNotice] = useState(false);
+  const [copiedPreOrderSql, setCopiedPreOrderSql] = useState(false);
 
   // Diagnostic Results
   const [diagResult, setDiagResult] = useState<SupabaseDiagnosticResult | null>(null);
@@ -132,6 +136,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
     setCopiedSql(true);
     setTimeout(() => setCopiedSql(false), 2000);
+  };
+
+  const handleCopyPreOrderSql = () => {
+    navigator.clipboard.writeText(SUPABASE_PRE_ORDERS_SQL_SCHEMA);
+    setCopiedPreOrderSql(true);
+    setTimeout(() => setCopiedPreOrderSql(false), 2000);
   };
 
   const projectId = customUrl.replace('https://', '').split('.')[0] || 'iqmbsdxicfthkncfxfsb';
@@ -313,18 +323,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
 
             {/* Cloud Storage Stats */}
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl p-3">
-                <span className="block text-[10px] uppercase font-mono text-slate-400">Products</span>
-                <span className="text-base font-bold text-blue-400 font-mono">{productsCount}</span>
+            <div className="grid grid-cols-4 gap-2 text-center">
+              <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl p-2.5">
+                <span className="block text-[9px] uppercase font-mono text-slate-400">Products</span>
+                <span className="text-sm font-bold text-blue-400 font-mono">{productsCount}</span>
               </div>
-              <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl p-3">
-                <span className="block text-[10px] uppercase font-mono text-slate-400">Customers</span>
-                <span className="text-base font-bold text-emerald-400 font-mono">{customersCount}</span>
+              <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl p-2.5">
+                <span className="block text-[9px] uppercase font-mono text-slate-400">Customers</span>
+                <span className="text-sm font-bold text-emerald-400 font-mono">{customersCount}</span>
               </div>
-              <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl p-3">
-                <span className="block text-[10px] uppercase font-mono text-slate-400">Invoices</span>
-                <span className="text-base font-bold text-purple-400 font-mono">{invoicesCount}</span>
+              <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl p-2.5">
+                <span className="block text-[9px] uppercase font-mono text-slate-400">Invoices</span>
+                <span className="text-sm font-bold text-purple-400 font-mono">{invoicesCount}</span>
+              </div>
+              <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl p-2.5">
+                <span className="block text-[9px] uppercase font-mono text-slate-400">Pre-Orders</span>
+                <span className="text-sm font-bold text-amber-400 font-mono">{preOrdersCount}</span>
               </div>
             </div>
 
@@ -520,14 +534,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 >
                   {showSqlSchema ? 'Hide Supabase SQL Schema' : 'View / Copy SQL Schema'}
                 </button>
-                <button
-                  type="button"
-                  onClick={handleCopySql}
-                  className="px-2 py-1 bg-[#121e38] hover:bg-[#18284c] text-slate-300 rounded-lg text-[10px] font-mono flex items-center gap-1"
-                >
-                  {copiedSql ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                  <span>{copiedSql ? 'Copied!' : 'Copy SQL'}</span>
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleCopyPreOrderSql}
+                    className="px-2 py-1 bg-amber-950/60 hover:bg-amber-900/80 text-amber-200 border border-amber-500/30 rounded-lg text-[10px] font-mono flex items-center gap-1"
+                    title="Copy Pre-Orders SQL only"
+                  >
+                    {copiedPreOrderSql ? <Check className="w-3 h-3 text-amber-400" /> : <Copy className="w-3 h-3 text-amber-400" />}
+                    <span>{copiedPreOrderSql ? 'Copied!' : 'Pre-Orders SQL'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopySql}
+                    className="px-2 py-1 bg-[#121e38] hover:bg-[#18284c] text-slate-300 rounded-lg text-[10px] font-mono flex items-center gap-1"
+                    title="Copy Complete Database SQL"
+                  >
+                    {copiedSql ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedSql ? 'Copied!' : 'Full SQL'}</span>
+                  </button>
+                </div>
               </div>
 
               {showSqlSchema && (

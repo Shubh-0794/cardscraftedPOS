@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Product, Customer, Invoice, StoreSettings, HoldCart } from '../types/pos';
+import { Product, Customer, Invoice, StoreSettings, HoldCart, PreOrder } from '../types/pos';
 
 // Session unique client identifier to prevent echo loops in Realtime
 export const CLIENT_INSTANCE_ID =
@@ -86,7 +86,7 @@ export interface SupabaseDiagnosticResult {
  */
 export async function runSupabaseDiagnostics(): Promise<SupabaseDiagnosticResult> {
   const projectId = SUPABASE_URL.replace('https://', '').split('.')[0] || 'unknown';
-  const tables = ['app_data', 'products', 'customers', 'invoices', 'store_settings', 'upi_configs'];
+  const tables = ['app_data', 'products', 'customers', 'invoices', 'pre_orders', 'store_settings', 'upi_configs'];
   const tableResults: TableDiagnostic[] = [];
 
   let connected = false;
@@ -436,6 +436,74 @@ export async function deleteInvoiceFromSupabase(invoiceId: string, remainingInvo
 }
 
 /**
+ * Directly persist a single pre-order to Supabase immediately upon creation or update
+ */
+export async function syncSinglePreOrderToSupabase(order: PreOrder, fullPreOrdersList?: PreOrder[]): Promise<boolean> {
+  try {
+    // 1. Write to dedicated relational `pre_orders` table
+    const { error: relError } = await supabase.from('pre_orders').upsert(
+      {
+        id: order.id,
+        order_number: order.orderNumber,
+        product_name: order.productName,
+        quantity: order.quantity || 1,
+        unit_price: order.unitPrice || 0,
+        total_price: order.totalPrice || 0,
+        advance_payment: order.advancePayment || 0,
+        balance_due: order.balanceDue || 0,
+        customer_name: order.customerName || '',
+        customer_phone: order.customerPhone || '',
+        customer_email: order.customerEmail || '',
+        expected_delivery_date: order.expectedDeliveryDate || '',
+        notes: order.notes || '',
+        advance_payment_method: order.advancePaymentMethod || 'upi',
+        status: order.status || 'advance_paid',
+        created_at: order.createdAt || new Date().toISOString(),
+        timestamp: order.timestamp || Date.now(),
+        completed_at: order.completedAt || null,
+        data: order,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    );
+
+    if (relError) {
+      console.warn('[Supabase] Warning on saving pre-order to pre_orders table:', relError.message);
+    }
+
+    // 2. Also keep snapshot store updated
+    if (fullPreOrdersList && fullPreOrdersList.length > 0) {
+      await saveAppDataToSupabase('pre_orders', fullPreOrdersList);
+    }
+
+    return true;
+  } catch (e) {
+    console.error('[Supabase] Error writing pre-order to Supabase:', e);
+    return false;
+  }
+}
+
+/**
+ * Directly delete a pre-order from Supabase (relational table and snapshot store)
+ */
+export async function deletePreOrderFromSupabase(orderId: string, remainingPreOrders?: PreOrder[]): Promise<boolean> {
+  try {
+    const { error: relError } = await supabase.from('pre_orders').delete().eq('id', orderId);
+    if (relError) {
+      console.warn('[Supabase] Note on deleting pre-order from table:', relError.message);
+    }
+
+    if (remainingPreOrders) {
+      await saveAppDataToSupabase('pre_orders', remainingPreOrders);
+    }
+    return true;
+  } catch (e) {
+    console.error('[Supabase] Error deleting pre-order from Supabase:', e);
+    return false;
+  }
+}
+
+/**
  * Save complete application snapshot to Supabase
  */
 export async function syncAllDataToSupabase(payload: {
@@ -444,6 +512,7 @@ export async function syncAllDataToSupabase(payload: {
   invoices: Invoice[];
   holdCarts: HoldCart[];
   settings: StoreSettings;
+  preOrders?: PreOrder[];
 }): Promise<{ success: boolean; errorCount: number }> {
   let errorCount = 0;
 
@@ -455,6 +524,7 @@ export async function syncAllDataToSupabase(payload: {
       saveAppDataToSupabase('invoices', payload.invoices),
       saveAppDataToSupabase('hold_carts', payload.holdCarts),
       saveAppDataToSupabase('store_settings', payload.settings),
+      saveAppDataToSupabase('pre_orders', payload.preOrders || []),
       saveAppDataToSupabase('last_sync_timestamp', Date.now()),
     ];
 
@@ -545,6 +615,43 @@ export async function syncAllDataToSupabase(payload: {
         }
       } catch (e) {
         console.warn('[Supabase] Exception syncing invoices table:', e);
+      }
+    }
+
+    // Sync pre_orders dedicated relational table
+    if (payload.preOrders && payload.preOrders.length > 0) {
+      try {
+        const { error: poErr } = await supabase.from('pre_orders').upsert(
+          payload.preOrders.map((o) => ({
+            id: o.id,
+            order_number: o.orderNumber,
+            product_name: o.productName,
+            quantity: o.quantity || 1,
+            unit_price: o.unitPrice || 0,
+            total_price: o.totalPrice || 0,
+            advance_payment: o.advancePayment || 0,
+            balance_due: o.balanceDue || 0,
+            customer_name: o.customerName || '',
+            customer_phone: o.customerPhone || '',
+            customer_email: o.customerEmail || '',
+            expected_delivery_date: o.expectedDeliveryDate || '',
+            notes: o.notes || '',
+            advance_payment_method: o.advancePaymentMethod || 'upi',
+            status: o.status || 'advance_paid',
+            created_at: o.createdAt || new Date().toISOString(),
+            timestamp: o.timestamp || Date.now(),
+            completed_at: o.completedAt || null,
+            data: o,
+            updated_at: new Date().toISOString(),
+          })),
+          { onConflict: 'id' }
+        );
+        if (poErr) {
+          console.warn('[Supabase] Pre-orders table sync note:', poErr.message);
+          errorCount++;
+        }
+      } catch (e) {
+        console.warn('[Supabase] Exception syncing pre_orders table:', e);
       }
     }
 
@@ -641,16 +748,18 @@ export async function fetchAllDataFromSupabase(): Promise<{
   invoices?: Invoice[];
   holdCarts?: HoldCart[];
   settings?: StoreSettings;
+  preOrders?: PreOrder[];
 } | null> {
   try {
     // 1. Fetch from app_data snapshot store
-    let [snapshotProducts, snapshotCustomers, snapshotInvoices, snapshotHoldCarts, snapshotSettings] =
+    let [snapshotProducts, snapshotCustomers, snapshotInvoices, snapshotHoldCarts, snapshotSettings, snapshotPreOrders] =
       await Promise.all([
         getAppDataFromSupabase<Product[]>('products'),
         getAppDataFromSupabase<Customer[]>('customers'),
         getAppDataFromSupabase<Invoice[]>('invoices'),
         getAppDataFromSupabase<HoldCart[]>('hold_carts'),
         getAppDataFromSupabase<StoreSettings>('store_settings'),
+        getAppDataFromSupabase<PreOrder[]>('pre_orders'),
       ]);
 
     // 2. Fetch from dedicated relational tables
@@ -733,6 +842,46 @@ export async function fetchAllDataFromSupabase(): Promise<{
       // ignore
     }
 
+    // Query dedicated pre_orders relational table
+    let relPreOrders: PreOrder[] = [];
+    try {
+      const { data: poData } = await supabase.from('pre_orders').select('*').order('timestamp', { ascending: false });
+      if (poData && poData.length > 0) {
+        relPreOrders = poData.map((row: any) => {
+          if (row.data && typeof row.data === 'object') {
+            return {
+              ...row.data,
+              id: row.id,
+              status: row.status ?? row.data.status,
+              balanceDue: Number(row.balance_due ?? row.data.balanceDue ?? 0),
+            };
+          }
+          return {
+            id: row.id,
+            orderNumber: row.order_number,
+            productName: row.product_name,
+            quantity: Number(row.quantity) || 1,
+            unitPrice: Number(row.unit_price) || 0,
+            totalPrice: Number(row.total_price) || 0,
+            advancePayment: Number(row.advance_payment) || 0,
+            balanceDue: Number(row.balance_due) || 0,
+            customerName: row.customer_name || '',
+            customerPhone: row.customer_phone || '',
+            customerEmail: row.customer_email || '',
+            expectedDeliveryDate: row.expected_delivery_date || '',
+            notes: row.notes || '',
+            advancePaymentMethod: row.advance_payment_method || 'upi',
+            status: row.status || 'advance_paid',
+            createdAt: row.created_at || new Date().toISOString(),
+            timestamp: Number(row.timestamp) || Date.now(),
+            completedAt: row.completed_at || undefined,
+          };
+        });
+      }
+    } catch (e) {
+      // ignore if table not created yet
+    }
+
     // Check store_settings and upi_configs relational tables
     try {
       const { data: storeRows } = await supabase.from('store_settings').select('*').limit(1);
@@ -808,12 +957,28 @@ export async function fetchAllDataFromSupabase(): Promise<{
       mergedInvoices = snapshotInvoices.sort((a, b) => b.timestamp - a.timestamp);
     }
 
+    // 6. Reconcile Pre-Orders (authoritative relational table when available, fallback to snapshot)
+    let mergedPreOrders: PreOrder[] = [];
+    if (relPreOrders.length > 0) {
+      const snapMap = new Map((snapshotPreOrders || []).map((o) => [o.id, o]));
+      mergedPreOrders = relPreOrders
+        .map((ro) => {
+          const snap = snapMap.get(ro.id);
+          return snap ? { ...snap, ...ro } : ro;
+        })
+        .sort((a, b) => b.timestamp - a.timestamp);
+    } else if (snapshotPreOrders && snapshotPreOrders.length > 0) {
+      mergedPreOrders = snapshotPreOrders.sort((a, b) => b.timestamp - a.timestamp);
+    }
+
     const hasAnyData =
       mergedProducts.length > 0 ||
       mergedCustomers.length > 0 ||
       mergedInvoices.length > 0 ||
+      mergedPreOrders.length > 0 ||
       snapshotHoldCarts !== null ||
-      snapshotSettings !== null;
+      snapshotSettings !== null ||
+      snapshotPreOrders !== null;
 
     if (!hasAnyData) {
       return null;
@@ -825,6 +990,7 @@ export async function fetchAllDataFromSupabase(): Promise<{
       invoices: mergedInvoices.length > 0 ? mergedInvoices : undefined,
       holdCarts: snapshotHoldCarts || undefined,
       settings: snapshotSettings || undefined,
+      preOrders: mergedPreOrders.length > 0 ? mergedPreOrders : undefined,
     };
   } catch (err) {
     console.error('[Supabase] Failed to fetch data from cloud:', err);
@@ -898,7 +1064,31 @@ CREATE TABLE IF NOT EXISTS public.invoices (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. Store Settings & Business Profile Table
+-- 5. Pre-Orders & Custom Booking Table
+CREATE TABLE IF NOT EXISTS public.pre_orders (
+  id TEXT PRIMARY KEY,
+  order_number TEXT UNIQUE NOT NULL,
+  product_name TEXT NOT NULL,
+  quantity INT NOT NULL DEFAULT 1,
+  unit_price NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+  total_price NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+  advance_payment NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+  balance_due NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+  customer_name TEXT,
+  customer_phone TEXT,
+  customer_email TEXT,
+  expected_delivery_date TEXT,
+  notes TEXT,
+  advance_payment_method TEXT DEFAULT 'upi',
+  status TEXT NOT NULL DEFAULT 'advance_paid',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  timestamp BIGINT NOT NULL,
+  completed_at TEXT,
+  data JSONB NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. Store Settings & Business Profile Table
 CREATE TABLE IF NOT EXISTS public.store_settings (
   id TEXT PRIMARY KEY DEFAULT 'default_store',
   store_name TEXT NOT NULL DEFAULT 'Cardcrafted',
@@ -922,7 +1112,7 @@ CREATE TABLE IF NOT EXISTS public.store_settings (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 6. Dedicated UPI Configurations & Payment Endpoints
+-- 7. Dedicated UPI Configurations & Payment Endpoints
 CREATE TABLE IF NOT EXISTS public.upi_configs (
   id TEXT PRIMARY KEY DEFAULT 'primary_upi',
   upi_id TEXT NOT NULL,
@@ -933,22 +1123,26 @@ CREATE TABLE IF NOT EXISTS public.upi_configs (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 7. Helpful Performance Indexes
+-- 8. Helpful Performance Indexes
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON public.products(barcode);
 CREATE INDEX IF NOT EXISTS idx_customers_phone ON public.customers(phone);
 CREATE INDEX IF NOT EXISTS idx_invoices_number ON public.invoices(invoice_number);
+CREATE INDEX IF NOT EXISTS idx_pre_orders_order_number ON public.pre_orders(order_number);
+CREATE INDEX IF NOT EXISTS idx_pre_orders_customer_phone ON public.pre_orders(customer_phone);
+CREATE INDEX IF NOT EXISTS idx_pre_orders_status ON public.pre_orders(status);
 CREATE INDEX IF NOT EXISTS idx_store_settings_upi ON public.store_settings(upi_id);
 CREATE INDEX IF NOT EXISTS idx_upi_configs_id ON public.upi_configs(upi_id);
 
--- 8. Enable Row Level Security (RLS)
+-- 9. Enable Row Level Security (RLS)
 ALTER TABLE public.app_data ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pre_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.store_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.upi_configs ENABLE ROW LEVEL SECURITY;
 
--- 9. Grant Clean Permissive Public Access Policies for POS Terminal
+-- 10. Grant Clean Permissive Public Access Policies for POS Terminal
 DROP POLICY IF EXISTS "Allow all on app_data" ON public.app_data;
 CREATE POLICY "Allow all on app_data" 
   ON public.app_data 
@@ -981,6 +1175,14 @@ CREATE POLICY "Allow all on invoices"
   USING (true) 
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Allow all on pre_orders" ON public.pre_orders;
+CREATE POLICY "Allow all on pre_orders" 
+  ON public.pre_orders 
+  FOR ALL 
+  TO anon, authenticated 
+  USING (true) 
+  WITH CHECK (true);
+
 DROP POLICY IF EXISTS "Allow all on store_settings" ON public.store_settings;
 CREATE POLICY "Allow all on store_settings" 
   ON public.store_settings 
@@ -992,6 +1194,55 @@ CREATE POLICY "Allow all on store_settings"
 DROP POLICY IF EXISTS "Allow all on upi_configs" ON public.upi_configs;
 CREATE POLICY "Allow all on upi_configs" 
   ON public.upi_configs 
+  FOR ALL 
+  TO anon, authenticated 
+  USING (true) 
+  WITH CHECK (true);
+`;
+
+/**
+ * Pre-Orders Specific SQL Schema for quick migration in Supabase SQL Editor
+ */
+export const SUPABASE_PRE_ORDERS_SQL_SCHEMA = `-- ==========================================
+-- PRE-ORDERS TABLE SCHEMA FOR SUPABASE
+-- Run this in your Supabase SQL Editor
+-- ==========================================
+
+CREATE TABLE IF NOT EXISTS public.pre_orders (
+  id TEXT PRIMARY KEY,
+  order_number TEXT UNIQUE NOT NULL,
+  product_name TEXT NOT NULL,
+  quantity INT NOT NULL DEFAULT 1,
+  unit_price NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+  total_price NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+  advance_payment NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+  balance_due NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+  customer_name TEXT,
+  customer_phone TEXT,
+  customer_email TEXT,
+  expected_delivery_date TEXT,
+  notes TEXT,
+  advance_payment_method TEXT DEFAULT 'upi',
+  status TEXT NOT NULL DEFAULT 'advance_paid',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  timestamp BIGINT NOT NULL,
+  completed_at TEXT,
+  data JSONB NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Performance Indexes
+CREATE INDEX IF NOT EXISTS idx_pre_orders_order_number ON public.pre_orders(order_number);
+CREATE INDEX IF NOT EXISTS idx_pre_orders_customer_phone ON public.pre_orders(customer_phone);
+CREATE INDEX IF NOT EXISTS idx_pre_orders_status ON public.pre_orders(status);
+
+-- Enable Row Level Security (RLS)
+ALTER TABLE public.pre_orders ENABLE ROW LEVEL SECURITY;
+
+-- Permissive Policy for POS Terminal operations
+DROP POLICY IF EXISTS "Allow all on pre_orders" ON public.pre_orders;
+CREATE POLICY "Allow all on pre_orders" 
+  ON public.pre_orders 
   FOR ALL 
   TO anon, authenticated 
   USING (true) 

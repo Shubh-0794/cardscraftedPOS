@@ -9,6 +9,7 @@ import {
   StoreSettings,
   HoldCart,
   BillDiscount,
+  PreOrder,
 } from './types/pos';
 import { INITIAL_PRODUCTS, INITIAL_STORE_SETTINGS, INITIAL_CUSTOMERS } from './data/sampleData';
 import { calculateCartTotals, calculateItemFinancials } from './utils/taxCalculator';
@@ -30,6 +31,8 @@ import { ProductFormModal } from './components/ProductFormModal';
 import { QrCodeViewerModal, QrCodeViewerData } from './components/QrCodeViewerModal';
 import { CustomerPaymentPortal } from './components/CustomerPaymentPortal';
 import { EditCustomerModal } from './components/EditCustomerModal';
+import { PreOrderTab } from './components/PreOrderTab';
+import { PreOrderSlipModal } from './components/PreOrderSlipModal';
 import { Trash2, Edit2, Crown, Calendar, TrendingUp, ArrowUpDown, History, ExternalLink, AlertTriangle, X } from 'lucide-react';
 import {
   supabase,
@@ -38,8 +41,10 @@ import {
   syncSingleInvoiceToSupabase,
   syncSingleProductToSupabase,
   syncSingleCustomerToSupabase,
+  syncSinglePreOrderToSupabase,
   deleteCustomerFromSupabase,
   deleteProductFromSupabase,
+  deletePreOrderFromSupabase,
   saveAppDataToSupabase,
   CLIENT_INSTANCE_ID,
 } from './lib/supabase';
@@ -78,6 +83,11 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
+  const [preOrders, setPreOrders] = useState<PreOrder[]>(() => {
+    const saved = localStorage.getItem('nexus_pos_pre_orders');
+    return saved ? JSON.parse(saved) : [];
+  });
+
   // Cloud Sync State & Loop Prevention Flags
   const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
   const [isCloudInitialized, setIsCloudInitialized] = useState<boolean>(false);
@@ -113,6 +123,8 @@ export default function App() {
     invoiceNumber: string;
     amount: number;
   } | null>(null);
+  const [selectedPreOrderForSlip, setSelectedPreOrderForSlip] = useState<PreOrder | null>(null);
+  const [isPreOrderSlipModalOpen, setIsPreOrderSlipModalOpen] = useState(false);
 
   // History tab filtering and sorting
   const [historyTabRange, setHistoryTabRange] = useState<'today' | 'weekly' | 'monthly' | 'yearly' | 'all'>('today');
@@ -300,6 +312,9 @@ export default function App() {
           if (cloudData.invoices && cloudData.invoices.length > 0) {
             setInvoices(cloudData.invoices);
           }
+          if (cloudData.preOrders && cloudData.preOrders.length > 0) {
+            setPreOrders(cloudData.preOrders);
+          }
           // Intelligently preserve held carts on reload
           const localSavedHold = localStorage.getItem('nexus_pos_hold_carts');
           const localHoldList: HoldCart[] = localSavedHold ? JSON.parse(localSavedHold) : [];
@@ -321,6 +336,7 @@ export default function App() {
             invoices,
             holdCarts,
             settings,
+            preOrders,
           });
         }
       } catch (err) {
@@ -356,6 +372,7 @@ export default function App() {
               if (fresh.invoices) setInvoices(fresh.invoices);
               if (fresh.holdCarts) setHoldCarts(fresh.holdCarts);
               if (fresh.settings) setSettings(fresh.settings);
+              if (fresh.preOrders) setPreOrders(fresh.preOrders);
             }
           } catch (e) {
             console.error('Error handling realtime update:', e);
@@ -372,6 +389,7 @@ export default function App() {
         invoices,
         holdCarts,
         settings,
+        preOrders,
       }).catch((e) => console.warn('[Supabase] Online flush note:', e));
     };
 
@@ -405,6 +423,10 @@ export default function App() {
     localStorage.setItem('nexus_pos_hold_carts', JSON.stringify(holdCarts));
   }, [holdCarts]);
 
+  useEffect(() => {
+    localStorage.setItem('nexus_pos_pre_orders', JSON.stringify(preOrders));
+  }, [preOrders]);
+
   // Continuous Cloud Sync Effect (Debounced Supabase Cloud Persistence with loop protection)
   useEffect(() => {
     if (!isCloudInitialized) return;
@@ -424,6 +446,7 @@ export default function App() {
           invoices,
           holdCarts,
           settings,
+          preOrders,
         });
       } catch (e) {
         console.warn('[Supabase] Background sync notice:', e);
@@ -433,7 +456,7 @@ export default function App() {
     }, 1200);
 
     return () => clearTimeout(timeout);
-  }, [products, settings, customers, invoices, holdCarts, isCloudInitialized]);
+  }, [products, settings, customers, invoices, holdCarts, preOrders, isCloudInitialized]);
 
   // Manual Trigger to Push All Data to Supabase
   const handleManualSyncToCloud = useCallback(async () => {
@@ -445,6 +468,7 @@ export default function App() {
         invoices,
         holdCarts,
         settings,
+        preOrders,
       });
       return res.success;
     } catch (e) {
@@ -453,7 +477,7 @@ export default function App() {
     } finally {
       setIsCloudSyncing(false);
     }
-  }, [products, customers, invoices, holdCarts, settings]);
+  }, [products, customers, invoices, holdCarts, settings, preOrders]);
 
   // Manual Trigger to Pull All Data from Supabase
   const handleManualPullFromCloud = useCallback(async () => {
@@ -466,6 +490,7 @@ export default function App() {
         if (fresh.invoices && fresh.invoices.length > 0) setInvoices(fresh.invoices);
         if (fresh.holdCarts) setHoldCarts(fresh.holdCarts);
         if (fresh.settings) setSettings(fresh.settings);
+        if (fresh.preOrders) setPreOrders(fresh.preOrders);
         return true;
       }
       return false;
@@ -475,6 +500,71 @@ export default function App() {
     } finally {
       setIsCloudSyncing(false);
     }
+  }, []);
+
+  // Pre-Orders CRUD Handlers with immediate Supabase DB synchronization
+  const handleSavePreOrder = useCallback((order: PreOrder) => {
+    let nextList: PreOrder[] = [];
+    setPreOrders((prev) => {
+      const idx = prev.findIndex((p) => p.id === order.id);
+      if (idx >= 0) {
+        nextList = [...prev];
+        nextList[idx] = order;
+      } else {
+        nextList = [order, ...prev];
+      }
+      return nextList;
+    });
+
+    // Immediately persist to dedicated Supabase pre_orders table and app_data snapshot
+    syncSinglePreOrderToSupabase(order, nextList).catch((err) =>
+      console.warn('[Supabase] Pre-order save note:', err)
+    );
+  }, []);
+
+  const handleDeletePreOrder = useCallback((id: string) => {
+    let nextList: PreOrder[] = [];
+    setPreOrders((prev) => {
+      nextList = prev.filter((p) => p.id !== id);
+      return nextList;
+    });
+
+    // Immediately delete from dedicated Supabase pre_orders table and app_data snapshot
+    deletePreOrderFromSupabase(id, nextList).catch((err) =>
+      console.warn('[Supabase] Pre-order delete note:', err)
+    );
+  }, []);
+
+  const handleUpdatePreOrderStatus = useCallback((id: string, status: PreOrder['status']) => {
+    let targetUpdated: PreOrder | null = null;
+    let nextList: PreOrder[] = [];
+    setPreOrders((prev) => {
+      nextList = prev.map((p) => {
+        if (p.id === id) {
+          const updated: PreOrder = {
+            ...p,
+            status,
+            balanceDue: status === 'completed' ? 0 : p.balanceDue,
+            completedAt: status === 'completed' ? new Date().toISOString() : p.completedAt,
+          };
+          targetUpdated = updated;
+          return updated;
+        }
+        return p;
+      });
+      return nextList;
+    });
+
+    if (targetUpdated) {
+      syncSinglePreOrderToSupabase(targetUpdated, nextList).catch((err) =>
+        console.warn('[Supabase] Pre-order status update note:', err)
+      );
+    }
+  }, []);
+
+  const handleOpenPreOrderSlip = useCallback((order: PreOrder) => {
+    setSelectedPreOrderForSlip(order);
+    setIsPreOrderSlipModalOpen(true);
   }, []);
 
 
@@ -885,15 +975,52 @@ export default function App() {
     method: PaymentMethod;
     status: PaymentStatus;
     details: Invoice['paymentDetails'];
+    customerData?: {
+      name: string;
+      phone: string;
+      countryCode: string;
+    };
   }) => {
     const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
 
-    const newInvoice: Invoice = {
-      id: `inv-${Date.now()}`,
-      invoiceNumber,
-      date: new Date().toISOString().split('T')[0],
-      timestamp: Date.now(),
-      customer: selectedCustomer || {
+    // Resolve exact customer object
+    let finalCustomer: Customer;
+    const cleanPhone = (paymentData.customerData?.phone || selectedCustomer?.phone || '').replace(/\D/g, '');
+    const custName = paymentData.customerData?.name?.trim() || selectedCustomer?.name || (cleanPhone ? `Customer (${cleanPhone.slice(-4)})` : 'Walk-in Customer');
+    const custCountry = paymentData.customerData?.countryCode || selectedCustomer?.countryCode || '+91';
+
+    if (selectedCustomer && selectedCustomer.id !== 'walk-in') {
+      finalCustomer = {
+        ...selectedCustomer,
+        name: custName,
+        phone: cleanPhone || selectedCustomer.phone,
+        countryCode: custCountry,
+      };
+    } else if (cleanPhone && cleanPhone !== '9999999999') {
+      const existingByPhone = customers.find((c) => c.phone.replace(/\D/g, '') === cleanPhone);
+      if (existingByPhone) {
+        finalCustomer = {
+          ...existingByPhone,
+          name: custName || existingByPhone.name,
+        };
+      } else {
+        finalCustomer = {
+          id: `cust-${Date.now()}`,
+          name: custName,
+          phone: cleanPhone,
+          countryCode: custCountry,
+          loyaltyPoints: 0,
+          totalSpent: 0,
+          ordersCount: 0,
+        };
+        const nextCusts = [finalCustomer, ...customers];
+        setCustomers(nextCusts);
+        syncSingleCustomerToSupabase(finalCustomer, nextCusts).catch((err) =>
+          console.warn('[Supabase] Direct customer save note:', err)
+        );
+      }
+    } else {
+      finalCustomer = {
         id: 'walk-in',
         name: 'Walk-in Customer',
         phone: '9999999999',
@@ -901,7 +1028,15 @@ export default function App() {
         loyaltyPoints: 0,
         totalSpent: 0,
         ordersCount: 0,
-      },
+      };
+    }
+
+    const newInvoice: Invoice = {
+      id: `inv-${Date.now()}`,
+      invoiceNumber,
+      date: new Date().toISOString().split('T')[0],
+      timestamp: Date.now(),
+      customer: finalCustomer,
       items: [...cart],
       subtotal: calculation.subtotal,
       totalTax: calculation.totalTax,
@@ -930,16 +1065,16 @@ export default function App() {
     );
 
     // Update customer spend & loyalty
-    if (selectedCustomer && selectedCustomer.id !== 'walk-in') {
+    if (finalCustomer && finalCustomer.id !== 'walk-in') {
       const pointsEarned = Math.floor(calculation.grandTotal / 100);
       const updatedCustomer: Customer = {
-        ...selectedCustomer,
-        totalSpent: selectedCustomer.totalSpent + calculation.grandTotal,
-        ordersCount: selectedCustomer.ordersCount + 1,
-        loyaltyPoints: selectedCustomer.loyaltyPoints + pointsEarned,
+        ...finalCustomer,
+        totalSpent: (finalCustomer.totalSpent || 0) + calculation.grandTotal,
+        ordersCount: (finalCustomer.ordersCount || 0) + 1,
+        loyaltyPoints: (finalCustomer.loyaltyPoints || 0) + pointsEarned,
       };
 
-      const nextCusts = customers.map((c) => (c.id === selectedCustomer.id ? updatedCustomer : c));
+      const nextCusts = customers.map((c) => (c.id === finalCustomer.id ? updatedCustomer : c));
       setCustomers(nextCusts);
 
       syncSingleCustomerToSupabase(updatedCustomer, nextCusts).catch((err) =>
@@ -1048,12 +1183,13 @@ export default function App() {
           isSyncing={isCloudSyncing}
         />
 
-        {/* 4 Segmented Tabs: ADD, TOTAL, PEOPLE, HISTORY */}
+        {/* Segmented Tabs: ADD, TOTAL, PRE ORDER, PEOPLE, HISTORY */}
         <TabBar
           activeTab={activeTab}
           onTabChange={setActiveTab}
           cartItemCount={cart.reduce((acc, it) => acc + it.quantity, 0)}
           customerSelected={Boolean(selectedCustomer)}
+          activePreOrdersCount={preOrders.filter((p) => p.status === 'advance_paid').length}
         />
 
         {/* Tab Body View */}
@@ -1115,8 +1251,23 @@ export default function App() {
                 onHoldCart={handleHoldCart}
                 onProceedToPayment={() => setIsPaymentModalOpen(true)}
                 onStockAlert={(msg) => triggerStockAlert(msg)}
+                onSelectCustomer={setSelectedCustomer}
+                onSaveNewCustomer={handleSaveNewCustomer}
               />
             </div>
+          )}
+
+          {activeTab === 'preorder' && (
+            <PreOrderTab
+              preOrders={preOrders}
+              products={products}
+              customers={customers}
+              settings={settings}
+              onSavePreOrder={handleSavePreOrder}
+              onDeletePreOrder={handleDeletePreOrder}
+              onUpdatePreOrderStatus={handleUpdatePreOrderStatus}
+              onOpenPreOrderSlip={handleOpenPreOrderSlip}
+            />
           )}
 
           {activeTab === 'people' && (
@@ -1450,6 +1601,7 @@ export default function App() {
         productsCount={products.length}
         customersCount={customers.length}
         invoicesCount={invoices.length}
+        preOrdersCount={preOrders.length}
         onSyncAllToCloud={handleManualSyncToCloud}
         onPullAllFromCloud={handleManualPullFromCloud}
         isSyncing={isCloudSyncing}
@@ -1504,7 +1656,21 @@ export default function App() {
         }}
       />
 
-      {/* 11. Customer Interactive Online Payment Portal (for ?pay=INV-...&amt=120) */}
+      {/* 11. Pre-Order Booking Slip & Balance Settlement Modal */}
+      <PreOrderSlipModal
+        isOpen={isPreOrderSlipModalOpen}
+        onClose={() => {
+          setIsPreOrderSlipModalOpen(false);
+          setSelectedPreOrderForSlip(null);
+        }}
+        preOrder={selectedPreOrderForSlip}
+        settings={settings}
+        onSettleBalance={(order) => {
+          handleUpdatePreOrderStatus(order.id, 'completed');
+        }}
+      />
+
+      {/* 12. Customer Interactive Online Payment Portal (for ?pay=INV-...&amt=120) */}
       {customerPaymentData && (
         <CustomerPaymentPortal
           invoiceNumber={customerPaymentData.invoiceNumber}

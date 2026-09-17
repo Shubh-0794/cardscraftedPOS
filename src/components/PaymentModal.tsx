@@ -30,6 +30,11 @@ interface PaymentModalProps {
     method: PaymentMethod;
     status: PaymentStatus;
     details: Invoice['paymentDetails'];
+    customerData?: {
+      name: string;
+      phone: string;
+      countryCode: string;
+    };
   }) => void;
 }
 
@@ -47,13 +52,14 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
   const [isLinkSent, setIsLinkSent] = useState(false);
 
+  // Customer phone & name state (shared across all payment modes)
+  const [customerPhone, setCustomerPhone] = useState<string>('');
+  const [customerName, setCustomerName] = useState<string>('');
+  const [countryCode, setCountryCode] = useState<string>('+91');
+
   // Cash States
   const [cashTendered, setCashTendered] = useState<number>(calculation.grandTotal);
   const changeDue = Math.max(0, cashTendered - calculation.grandTotal);
-
-  // WhatsApp States
-  const [whatsAppPhone, setWhatsAppPhone] = useState<string>('');
-  const [whatsAppCustomerName, setWhatsAppCustomerName] = useState<string>('');
 
   // Canvas ref for zero-flicker instant QR rendering
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -62,8 +68,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setCashTendered(calculation.grandTotal);
-      setWhatsAppPhone(customer?.phone || '');
-      setWhatsAppCustomerName(customer?.name || 'Customer');
+      setCustomerPhone(customer?.phone || '');
+      setCustomerName(customer?.name || 'Walk-in Customer');
+      setCountryCode(customer?.countryCode || '+91');
       setIsLinkSent(false);
       setCopiedUPI(false);
       setCopiedLink(false);
@@ -77,10 +84,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       payeeName: settings.upiPayeeName || settings.storeName,
       amount: calculation.grandTotal,
       currency: settings.currencyCode || 'INR',
-      transactionNote: `Bill for ${whatsAppCustomerName || customer?.name || 'Customer'}`,
+      transactionNote: `Bill for ${customerName || customer?.name || 'Customer'}`,
       transactionRef: `INV${Math.floor(calculation.grandTotal * 100)}`,
     });
-  }, [settings.upiId, settings.upiPayeeName, settings.storeName, calculation.grandTotal, whatsAppCustomerName, customer?.name, settings.currencyCode]);
+  }, [settings.upiId, settings.upiPayeeName, settings.storeName, calculation.grandTotal, customerName, customer?.name, settings.currencyCode]);
 
   // Render QR directly to canvas without network or image reloading
   useEffect(() => {
@@ -106,9 +113,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   if (!isOpen) return null;
 
   const handleSendWhatsAppPaymentLink = () => {
-    const targetPhone = whatsAppPhone.trim() || '9999999999';
-    const waUrl = getWhatsAppPaymentDirectUrl(targetPhone, customer?.countryCode || '+91', {
-      customerName: whatsAppCustomerName || customer?.name || 'Customer',
+    const targetPhone = customerPhone.trim() || '9999999999';
+    const waUrl = getWhatsAppPaymentDirectUrl(targetPhone, countryCode || '+91', {
+      customerName: customerName || 'Customer',
       amount: calculation.grandTotal,
       currencySymbol: settings.currencySymbol || '₹',
       storeName: settings.storeName || 'Cardcrafted by Shivani',
@@ -124,7 +131,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
   const handleCopyPaymentLink = () => {
     const message = buildWhatsAppPaymentLinkMessage({
-      customerName: whatsAppCustomerName || customer?.name || 'Customer',
+      customerName: customerName || 'Customer',
       amount: calculation.grandTotal,
       currencySymbol: settings.currencySymbol || '₹',
       storeName: settings.storeName || 'Cardcrafted by Shivani',
@@ -173,7 +180,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         };
       } else if (activeTab === 'whatsapp') {
         paymentDetails = {
-          whatsappPhone: whatsAppPhone,
+          whatsappPhone: customerPhone,
           paymentLinkSent: isLinkSent,
           paymentLink: upiDeepLink,
           upiIdUsed: settings.upiId,
@@ -184,6 +191,13 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         method: activeTab,
         status: 'completed',
         details: paymentDetails,
+        customerData: customerPhone
+          ? {
+              name: customerName.trim() || `Customer (${customerPhone.slice(-4)})`,
+              phone: customerPhone.replace(/\D/g, ''),
+              countryCode: countryCode || '+91',
+            }
+          : undefined,
       });
     }, 400);
   };
@@ -199,17 +213,46 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               Total Payable: <span className="font-bold font-mono text-blue-400 text-sm">{formatCurrency(calculation.grandTotal, settings.currencySymbol)}</span>
             </p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-200 p-1">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-200 p-1 cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
 
+        {/* Customer WhatsApp Details Row (Universal across all payment modes) */}
+        <div className="bg-[#090f1c] px-5 py-2.5 border-b border-[#1b2b48]">
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-[10px] font-extrabold text-emerald-400 tracking-wider uppercase font-mono flex items-center gap-1.5">
+              <Phone className="w-3 h-3 text-emerald-400" />
+              <span>Customer WhatsApp (for PDF Bill)</span>
+            </label>
+            <span className="text-[9px] text-slate-400 font-mono">
+              {customerPhone ? 'Target Linked' : 'Enter 10 Digits'}
+            </span>
+          </div>
+          <div className="grid grid-cols-5 gap-2">
+            <input
+              type="tel"
+              placeholder="10-digit mobile"
+              value={customerPhone}
+              onChange={(e) => setCustomerPhone(e.target.value)}
+              className="col-span-3 bg-[#0d172e] border border-[#1b2b48] focus:border-emerald-500 rounded-lg px-2.5 py-1 text-xs text-slate-100 font-mono focus:outline-none placeholder:text-slate-600"
+            />
+            <input
+              type="text"
+              placeholder="Name"
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              className="col-span-2 bg-[#0d172e] border border-[#1b2b48] focus:border-blue-500 rounded-lg px-2.5 py-1 text-xs text-slate-100 focus:outline-none placeholder:text-slate-600 truncate"
+            />
+          </div>
+        </div>
+
         {/* 3 Payment Methods Tabs (UPI QR, Cash, WhatsApp Link) */}
-        <div className="flex border-b border-[#1b2b48] bg-[#090f1c] p-1.5 gap-1">
+        <div className="flex border-b border-[#1b2b48] bg-[#070d1a] p-1.5 gap-1">
           <button
             type="button"
             onClick={() => setActiveTab('upi')}
-            className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+            className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
               activeTab === 'upi' ? 'bg-[#15274d] text-blue-400 border border-blue-500/50' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -220,7 +263,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('cash')}
-            className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+            className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
               activeTab === 'cash' ? 'bg-[#15274d] text-blue-400 border border-blue-500/50' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -231,7 +274,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('whatsapp')}
-            className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+            className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
               activeTab === 'whatsapp' ? 'bg-[#0f2d26] text-emerald-400 border border-emerald-500/50' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -253,7 +296,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 <p className="text-xs font-bold text-slate-200">Scan with GPay, PhonePe, Paytm or BHIM</p>
                 <div className="flex items-center justify-center gap-1.5 mt-1 text-xs text-slate-400 font-mono">
                   <span>VPA: {settings.upiId}</span>
-                  <button onClick={handleCopyUPI} className="p-1 hover:text-blue-400" title="Copy UPI VPA">
+                  <button onClick={handleCopyUPI} className="p-1 hover:text-blue-400 cursor-pointer" title="Copy UPI VPA">
                     {copiedUPI ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                   </button>
                 </div>
@@ -283,7 +326,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                     key={preset}
                     type="button"
                     onClick={() => setCashTendered(preset)}
-                    className="flex-1 py-1.5 bg-[#121e38] hover:bg-[#18284c] text-slate-300 rounded-xl text-xs font-bold font-mono transition-colors"
+                    className="flex-1 py-1.5 bg-[#121e38] hover:bg-[#18284c] text-slate-300 rounded-xl text-xs font-bold font-mono transition-colors cursor-pointer"
                   >
                     ₹{preset}
                   </button>
@@ -308,13 +351,13 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 </label>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-slate-400 font-mono text-xs font-bold">
-                    {customer?.countryCode || '+91'}
+                    {countryCode || '+91'}
                   </span>
                   <input
                     type="tel"
                     placeholder="Enter 10-digit mobile number"
-                    value={whatsAppPhone}
-                    onChange={(e) => setWhatsAppPhone(e.target.value)}
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
                     className="w-full bg-transparent text-sm font-mono font-bold text-slate-100 focus:outline-none placeholder:text-slate-600"
                     autoFocus
                   />
@@ -326,7 +369,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 <button
                   type="button"
                   onClick={handleSendWhatsAppPaymentLink}
-                  className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 transition-all"
+                  className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 transition-all cursor-pointer"
                 >
                   <Send className="w-4 h-4" />
                   <span>Send Payment Link to WhatsApp</span>
@@ -336,7 +379,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 <button
                   type="button"
                   onClick={handleCopyPaymentLink}
-                  className="w-full py-2 px-3 bg-[#111c33] hover:bg-[#162442] text-slate-300 rounded-xl text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                  className="w-full py-2 px-3 bg-[#111c33] hover:bg-[#162442] text-slate-300 rounded-xl text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                 >
                   {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                   <span>{copiedLink ? 'Link Copied to Clipboard!' : 'Copy Payment Message Link'}</span>

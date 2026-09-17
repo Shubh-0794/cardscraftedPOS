@@ -2,6 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { Invoice, StoreSettings } from '../types/pos';
 import { formatCurrency } from '../utils/taxCalculator';
 import { generateWhatsAppPayloads } from '../utils/whatsapp';
+import { createInvoicePdfBlob } from '../utils/qrPdfGenerator';
+import { posAudio } from '../utils/audio';
 import {
   History,
   Search,
@@ -17,6 +19,7 @@ import {
   ChevronDown,
   Clock,
   IndianRupee,
+  FileDown,
 } from 'lucide-react';
 
 export type TimeRangeFilter = 'today' | 'weekly' | 'monthly' | 'yearly' | 'all';
@@ -131,9 +134,51 @@ export const SalesHistoryModal: React.FC<SalesHistoryModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleQuickSendWA = (invoice: Invoice) => {
-    const payloads = generateWhatsAppPayloads(invoice, settings);
-    window.open(payloads.waMeLink, '_blank', 'noopener,noreferrer');
+  const [dispatchingId, setDispatchingId] = useState<string | null>(null);
+
+  const handleQuickSendWA = async (invoice: Invoice) => {
+    setDispatchingId(invoice.id);
+    try {
+      const { doc, file, filename } = await createInvoicePdfBlob(invoice, settings);
+      const cleanDigits = (invoice.customer.phone || '').replace(/\D/g, '');
+      const cleanCountry = (invoice.customer.countryCode || '+91').replace(/\D/g, '') || '91';
+      const fullPhone = cleanDigits ? `${cleanCountry}${cleanDigits}` : '';
+
+      const canNativeShareFiles =
+        typeof navigator !== 'undefined' &&
+        navigator.canShare &&
+        navigator.canShare({ files: [file] });
+
+      if (canNativeShareFiles) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: `Invoice #${invoice.invoiceNumber} - ${settings.storeName}`,
+            text: `🧾 Tax Invoice #${invoice.invoiceNumber} from ${settings.storeName}\nCustomer: ${invoice.customer.name || 'Valued Customer'}\nTotal: ${formatCurrency(invoice.grandTotal, settings.currencySymbol)}\n📎 PDF Invoice attached.`,
+          });
+          posAudio.playSuccessChime();
+          setDispatchingId(null);
+          return;
+        } catch (e: any) {
+          if (e.name === 'AbortError') {
+            setDispatchingId(null);
+            return;
+          }
+        }
+      }
+
+      // Fallback
+      doc.save(filename);
+      posAudio.playSuccessChime();
+      const payloads = generateWhatsAppPayloads(invoice, settings);
+      window.open(payloads.waMeLink, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      console.error('Failed to dispatch PDF from history:', err);
+      const payloads = generateWhatsAppPayloads(invoice, settings);
+      window.open(payloads.waMeLink, '_blank', 'noopener,noreferrer');
+    } finally {
+      setTimeout(() => setDispatchingId(null), 800);
+    }
   };
 
   const timeRangeLabels: Record<TimeRangeFilter, string> = {

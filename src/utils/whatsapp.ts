@@ -1,4 +1,4 @@
-import { Invoice, StoreSettings } from '../types/pos';
+import { Invoice, StoreSettings, PreOrder } from '../types/pos';
 import { formatCurrency } from './taxCalculator';
 import { buildUPIDeepLink } from './upi';
 
@@ -234,6 +234,83 @@ export function getWhatsAppPaymentDirectUrl(
   const cleanCountryCode = countryCode.replace(/\D/g, '') || '91';
   const fullPhone = `${cleanCountryCode}${cleanPhone}`;
   const message = buildWhatsAppPaymentLinkMessage(params);
+  return cleanPhone
+    ? `https://wa.me/${fullPhone}?text=${encodeURIComponent(message)}`
+    : `https://wa.me/?text=${encodeURIComponent(message)}`;
+}
+
+export function buildWhatsAppPreOrderMessage(
+  preOrder: PreOrder,
+  settings: StoreSettings,
+  includePdfNotice: boolean = true
+): string {
+  const symbol = settings.currencySymbol || '₹';
+  const cleanPhone = (preOrder.customerPhone || '').replace(/\D/g, '');
+  let message = `📋 *PRE-ORDER BOOKING CONFIRMATION - ${settings.storeName.toUpperCase()}*\n`;
+  message += `━━━━━━━━━━━━━━━━━━━━━\n`;
+  message += `📍 *${settings.storeName}*\n`;
+  if (settings.phone) {
+    message += `📞 Support: ${settings.phone}\n`;
+  }
+  message += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+  message += `👤 *Customer:* ${preOrder.customerName || 'Valued Customer'}\n`;
+  if (cleanPhone) {
+    message += `📱 *Phone:* ${preOrder.customerPhone}\n`;
+  }
+  message += `🔖 *Pre-Order No:* #${preOrder.orderNumber}\n`;
+  message += `📅 *Booking Date:* ${new Date(preOrder.timestamp).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}\n`;
+  if (preOrder.expectedDeliveryDate) {
+    message += `🚚 *Expected Delivery / Pickup:* ${preOrder.expectedDeliveryDate}\n`;
+  }
+  message += `\n`;
+
+  message += `🛍️ *PRE-ORDER ITEM DETAILS:*\n`;
+  message += `─────────────────────\n`;
+  message += `• *Product:* ${preOrder.productName}\n`;
+  message += `• *Quantity:* ${preOrder.quantity}\n`;
+  message += `• *Unit Price:* ${formatCurrency(preOrder.unitPrice, symbol)}\n`;
+  message += `• *Total Order Price:* *${formatCurrency(preOrder.totalPrice, symbol)}*\n`;
+  message += `─────────────────────\n\n`;
+
+  message += `💵 *PAYMENT SUMMARY:*\n`;
+  message += `✅ *Advance Paid:* ${formatCurrency(preOrder.advancePayment, symbol)}\n`;
+  message += `⏳ *Remaining Balance Due:* *${formatCurrency(preOrder.balanceDue, symbol)}*\n`;
+  message += `📌 *Status:* ${
+    preOrder.status === 'completed'
+      ? '✅ FULLY PAID / DELIVERED'
+      : preOrder.status === 'cancelled'
+      ? '❌ CANCELLED'
+      : '⏳ ADVANCE RECEIVED (BALANCE PENDING)'
+  }\n\n`;
+
+  if (preOrder.notes) {
+    message += `📝 *Notes/Specs:* ${preOrder.notes}\n\n`;
+  }
+
+  if (preOrder.balanceDue > 0 && settings.upiId) {
+    message += `🏦 *Pay Balance via UPI:* \`${settings.upiId}\`\n\n`;
+  }
+
+  if (includePdfNotice) {
+    message += `📎 *Official Pre-Order PDF Booking Slip attached.*\n\n`;
+  }
+
+  message += `✨ _${settings.invoiceFooterNote || 'Thank you for your pre-order! We are preparing your order with care.'}_`;
+  return message;
+}
+
+export function getWhatsAppPreOrderDirectUrl(
+  preOrder: PreOrder,
+  settings: StoreSettings,
+  overridePhone?: string,
+  overrideCountryCode?: string
+): string {
+  const targetPhone = overridePhone !== undefined ? overridePhone : (preOrder.customerPhone || '');
+  const cleanPhone = targetPhone.replace(/\D/g, '');
+  const country = (overrideCountryCode || '+91').replace(/\D/g, '') || '91';
+  const fullPhone = cleanPhone.length === 10 ? `${country}${cleanPhone}` : cleanPhone;
+  const message = buildWhatsAppPreOrderMessage(preOrder, settings, true);
   return cleanPhone
     ? `https://wa.me/${fullPhone}?text=${encodeURIComponent(message)}`
     : `https://wa.me/?text=${encodeURIComponent(message)}`;

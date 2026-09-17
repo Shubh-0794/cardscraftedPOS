@@ -133,3 +133,24 @@ export interface HoldCart {
   itemCount: number;
   totalAmount: number;
 }
+
+export interface PreOrder {
+  id: string;
+  orderNumber: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  advancePayment: number;
+  balanceDue: number;
+  customerName?: string;
+  customerPhone?: string;
+  customerEmail?: string;
+  expectedDeliveryDate?: string;
+  notes?: string;
+  advancePaymentMethod?: PaymentMethod;
+  status: 'advance_paid' | 'completed' | 'cancelled';
+  createdAt: string;
+  timestamp: number;
+  completedAt?: string;
+}
