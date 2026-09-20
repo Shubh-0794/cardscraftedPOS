@@ -220,13 +220,14 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
         {/* Customer WhatsApp Details Row (Universal across all payment modes) */}
         <div className="bg-[#090f1c] px-5 py-2.5 border-b border-[#1b2b48]">
-          <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center justify-between mb-1.5">
             <label className="text-[10px] font-extrabold text-emerald-400 tracking-wider uppercase font-mono flex items-center gap-1.5">
               <Phone className="w-3 h-3 text-emerald-400" />
-              <span>Customer WhatsApp (for PDF Bill)</span>
+              <span>Customer WhatsApp (Auto-Send PDF)</span>
             </label>
-            <span className="text-[9px] text-slate-400 font-mono">
-              {customerPhone ? 'Target Linked' : 'Enter 10 Digits'}
+            <span className="text-[9px] text-emerald-300 font-mono bg-emerald-950/80 border border-emerald-500/30 px-1.5 py-0.5 rounded flex items-center gap-1">
+              <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+              {customerPhone ? '⚡ Auto-Send Armed' : 'Enter 10 Digits'}
             </span>
           </div>
           <div className="grid grid-cols-5 gap-2">
@@ -235,16 +236,19 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               placeholder="10-digit mobile"
               value={customerPhone}
               onChange={(e) => setCustomerPhone(e.target.value)}
-              className="col-span-3 bg-[#0d172e] border border-[#1b2b48] focus:border-emerald-500 rounded-lg px-2.5 py-1 text-xs text-slate-100 font-mono focus:outline-none placeholder:text-slate-600"
+              className="col-span-3 bg-[#0d172e] border border-emerald-500/40 focus:border-emerald-400 rounded-lg px-2.5 py-1 text-xs text-slate-100 font-mono focus:outline-none placeholder:text-slate-600"
             />
             <input
               type="text"
-              placeholder="Name"
+              placeholder="Customer Name"
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               className="col-span-2 bg-[#0d172e] border border-[#1b2b48] focus:border-blue-500 rounded-lg px-2.5 py-1 text-xs text-slate-100 focus:outline-none placeholder:text-slate-600 truncate"
             />
           </div>
+          <p className="text-[9.5px] text-slate-400 font-mono mt-1 flex items-center gap-1">
+            <span className="text-emerald-400 font-bold">⚡ Instant:</span> PDF Invoice will automatically dispatch to customer's WhatsApp on payment confirmation.
+          </p>
         </div>
 
         {/* 3 Payment Methods Tabs (UPI QR, Cash, WhatsApp Link) */}

@@ -90,6 +90,7 @@ export const PreOrderTab: React.FC<PreOrderTabProps> = ({
 
   // Settle Balance modal state
   const [settleOrder, setSettleOrder] = useState<PreOrder | null>(null);
+  const [deletingOrder, setDeletingOrder] = useState<PreOrder | null>(null);
   const [settleMethod, setSettleMethod] = useState<PaymentMethod>('cash');
   const [sendingPdfOrderId, setSendingPdfOrderId] = useState<string | null>(null);
 
@@ -1005,13 +1006,12 @@ export const PreOrderTab: React.FC<PreOrderTabProps> = ({
 
                         <button
                           type="button"
-                          onClick={() => {
-                            if (window.confirm(`Delete Pre-Order #${order.orderNumber}?`)) {
-                              onDeletePreOrder(order.id);
-                            }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeletingOrder(order);
                           }}
                           className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors cursor-pointer"
-                          title="Delete"
+                          title="Delete Pre-Order"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -1029,6 +1029,45 @@ export const PreOrderTab: React.FC<PreOrderTabProps> = ({
                 </p>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete Pre-Order Confirmation Modal */}
+      {deletingOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-[#0c1427] border border-rose-500/40 rounded-3xl p-5 max-w-sm w-full space-y-4 shadow-2xl text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h4 className="font-bold text-sm text-slate-100">Delete Pre-Order #{deletingOrder.orderNumber}?</h4>
+              <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                Are you sure you want to permanently delete pre-order for <strong className="text-slate-200">{deletingOrder.productName}</strong> ({deletingOrder.customerName || 'Customer'})?
+              </p>
+              <p className="text-[11px] text-rose-400/80 font-mono mt-1">
+                This will be permanently removed from Supabase and local storage.
+              </p>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingOrder(null)}
+                className="flex-1 py-2.5 bg-[#16233b] hover:bg-[#1e2f4f] text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeletePreOrder(deletingOrder.id);
+                  setDeletingOrder(null);
+                }}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-rose-950/40 cursor-pointer"
+              >
+                Confirm Delete
+              </button>
+            </div>
           </div>
         </div>
       )}

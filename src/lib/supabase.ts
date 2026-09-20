@@ -425,7 +425,7 @@ export async function deleteInvoiceFromSupabase(invoiceId: string, remainingInvo
     if (relError) {
       console.warn('[Supabase] Note on deleting invoice from table:', relError.message);
     }
-    if (remainingInvoices) {
+    if (remainingInvoices !== undefined) {
       await saveAppDataToSupabase('invoices', remainingInvoices);
     }
     return true;
@@ -472,7 +472,7 @@ export async function syncSinglePreOrderToSupabase(order: PreOrder, fullPreOrder
     }
 
     // 2. Also keep snapshot store updated
-    if (fullPreOrdersList && fullPreOrdersList.length > 0) {
+    if (fullPreOrdersList !== undefined) {
       await saveAppDataToSupabase('pre_orders', fullPreOrdersList);
     }
 
@@ -493,7 +493,7 @@ export async function deletePreOrderFromSupabase(orderId: string, remainingPreOr
       console.warn('[Supabase] Note on deleting pre-order from table:', relError.message);
     }
 
-    if (remainingPreOrders) {
+    if (remainingPreOrders !== undefined) {
       await saveAppDataToSupabase('pre_orders', remainingPreOrders);
     }
     return true;

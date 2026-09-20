@@ -1,9 +1,14 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { PreOrder, StoreSettings } from '../types/pos';
 import { formatCurrency } from '../utils/taxCalculator';
 import { buildUPIDeepLink } from '../utils/upi';
-import { getWhatsAppPreOrderDirectUrl, buildWhatsAppPreOrderMessage } from '../utils/whatsapp';
+import {
+  getWhatsAppPreOrderDirectUrl,
+  buildWhatsAppPreOrderMessage,
+  formatWhatsAppFullNumber,
+} from '../utils/whatsapp';
 import { createPreOrderPdfBlob, generatePreOrderPdf } from '../utils/qrPdfGenerator';
+import { printPreOrderReceipt } from '../utils/printReceipt';
 import { posAudio } from '../utils/audio';
 import QRCode from 'qrcode';
 import {
@@ -42,6 +47,7 @@ export const PreOrderSlipModal: React.FC<PreOrderSlipModalProps> = ({
   const [balanceQrDataUrl, setBalanceQrDataUrl] = useState<string>('');
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [isPrintingSlip, setIsPrintingSlip] = useState(false);
   const [pdfDownloaded, setPdfDownloaded] = useState(false);
   const [shareNotice, setShareNotice] = useState<string | null>(null);
 
@@ -51,18 +57,8 @@ export const PreOrderSlipModal: React.FC<PreOrderSlipModalProps> = ({
   const [isEditingPhone, setIsEditingPhone] = useState(false);
 
   const slipRef = useRef<HTMLDivElement>(null);
+  const autoDispatchedRef = useRef<string | null>(null);
   const symbol = settings.currencySymbol || '₹';
-
-  useEffect(() => {
-    if (isOpen && preOrder) {
-      setPdfDownloaded(false);
-      setShareNotice(null);
-      setCustomerPhone(preOrder.customerPhone || '');
-      setCountryCode('+91');
-      setIsEditingPhone(!preOrder.customerPhone);
-      posAudio.playReceiptPrintSound();
-    }
-  }, [isOpen, preOrder?.id, preOrder?.customerPhone]);
 
   // Generate UPI QR for collecting remaining balance
   useEffect(() => {
@@ -92,17 +88,22 @@ export const PreOrderSlipModal: React.FC<PreOrderSlipModalProps> = ({
       .catch((err) => console.error('Failed to generate balance QR:', err));
   }, [preOrder, settings.upiId, settings.upiPayeeName, settings.storeName, settings.currencyCode]);
 
-  if (!isOpen || !preOrder) return null;
-
-  const isCompleted = preOrder.status === 'completed';
-  const isCancelled = preOrder.status === 'cancelled';
-
-  const handlePrint = () => {
-    window.print();
+  const handlePrint = async () => {
+    if (!preOrder) return;
+    setIsPrintingSlip(true);
+    try {
+      await printPreOrderReceipt(preOrder, settings);
+      posAudio.playReceiptPrintSound();
+    } catch (err) {
+      console.error('Failed to print pre-order slip:', err);
+    } finally {
+      setIsPrintingSlip(false);
+    }
   };
 
   // Download PDF Slip
   const handleDownloadPdf = async () => {
+    if (!preOrder) return;
     setIsDownloadingPdf(true);
     try {
       await generatePreOrderPdf(preOrder, settings);
@@ -117,74 +118,101 @@ export const PreOrderSlipModal: React.FC<PreOrderSlipModalProps> = ({
   };
 
   // Dispatch PDF Slip to Customer WhatsApp
-  const handleSendPdfWhatsApp = async () => {
-    const cleanPhoneDigits = customerPhone.replace(/\D/g, '');
-    if (!cleanPhoneDigits) {
-      setIsEditingPhone(true);
-      setShareNotice('Please enter the customer WhatsApp phone number.');
-      return;
-    }
-
-    setIsSendingWhatsApp(true);
-    setShareNotice(null);
-
-    const cleanCountry = countryCode.replace(/\D/g, '') || '91';
-    const fullCustomerNumber = `${cleanCountry}${cleanPhoneDigits}`;
-
-    try {
-      // 1. Create high-fidelity Pre-Order PDF Slip Blob and File
-      const { doc, file, filename } = await createPreOrderPdfBlob(preOrder, settings);
-
-      // 2. Check if native Web Share with Files is supported (Mobile WhatsApp share)
-      const canNativeShareFiles =
-        typeof navigator !== 'undefined' &&
-        navigator.canShare &&
-        navigator.canShare({ files: [file] });
-
-      const plainTextMessage = buildWhatsAppPreOrderMessage(preOrder, settings, true);
-
-      if (canNativeShareFiles) {
-        try {
-          await navigator.share({
-            files: [file],
-            title: `Pre-Order Slip #${preOrder.orderNumber} - ${settings.storeName}`,
-            text: plainTextMessage,
-          });
-          setPdfDownloaded(true);
-          posAudio.playSuccessChime();
-          setIsSendingWhatsApp(false);
-          setShareNotice(`PDF Slip shared to WhatsApp (+${fullCustomerNumber})!`);
-          return;
-        } catch (shareErr: any) {
-          if (shareErr.name === 'AbortError') {
-            setIsSendingWhatsApp(false);
-            return;
-          }
-          console.warn('Native file share fallback:', shareErr);
-        }
+  const handleSendPdfWhatsApp = useCallback(
+    async (isAuto = false, overridePhone?: string) => {
+      if (!preOrder) return;
+      const rawPhone = overridePhone !== undefined ? overridePhone : customerPhone;
+      const cleanPhoneDigits = rawPhone.replace(/\D/g, '');
+      if (!cleanPhoneDigits || cleanPhoneDigits === '9999999999' || cleanPhoneDigits.length < 5) {
+        setIsEditingPhone(true);
+        setShareNotice('Please enter customer WhatsApp phone number.');
+        return;
       }
 
-      // 3. Fallback: Download the PDF slip and open direct WhatsApp chat
-      doc.save(filename);
-      setPdfDownloaded(true);
-      posAudio.playSuccessChime();
+      setIsSendingWhatsApp(true);
+      setShareNotice(null);
 
-      setShareNotice(`PDF Slip downloaded! Opening WhatsApp for +${fullCustomerNumber}...`);
+      const fullCustomerNumber = formatWhatsAppFullNumber(rawPhone, countryCode);
 
-      const customerWaMeUrl = getWhatsAppPreOrderDirectUrl(preOrder, settings, customerPhone, countryCode);
-      window.open(customerWaMeUrl, '_blank', 'noopener,noreferrer');
+      try {
+        // 1. Create high-fidelity Pre-Order PDF Slip Blob and File
+        const { doc, file, filename } = await createPreOrderPdfBlob(preOrder, settings);
 
-      setTimeout(() => {
+        // 2. Check if native Web Share with Files is supported (Mobile WhatsApp share) - user gesture only
+        if (!isAuto && typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            const plainTextMessage = buildWhatsAppPreOrderMessage(preOrder, settings, true);
+            await navigator.share({
+              files: [file],
+              title: `Pre-Order Slip #${preOrder.orderNumber} - ${settings.storeName}`,
+              text: plainTextMessage,
+            });
+            setPdfDownloaded(true);
+            posAudio.playSuccessChime();
+            setIsSendingWhatsApp(false);
+            setShareNotice(`⚡ PDF Slip shared to WhatsApp (+${fullCustomerNumber})!`);
+            return;
+          } catch (shareErr: any) {
+            if (shareErr.name === 'AbortError') {
+              setIsSendingWhatsApp(false);
+              return;
+            }
+            console.warn('Native file share fallback:', shareErr);
+          }
+        }
+
+        // 3. Fallback / Auto: Download the PDF slip and open direct WhatsApp chat
+        doc.save(filename);
+        setPdfDownloaded(true);
+        posAudio.playSuccessChime();
+
+        setShareNotice(`⚡ PDF Slip automatically prepared for WhatsApp (+${fullCustomerNumber})!`);
+
+        const customerWaMeUrl = getWhatsAppPreOrderDirectUrl(preOrder, settings, rawPhone, countryCode);
+        window.open(customerWaMeUrl, '_blank', 'noopener,noreferrer');
+
+        setTimeout(() => {
+          setIsSendingWhatsApp(false);
+        }, 1000);
+      } catch (err) {
+        console.error('Error sharing pre-order PDF to WhatsApp:', err);
         setIsSendingWhatsApp(false);
-      }, 1000);
-    } catch (err) {
-      console.error('Failed to send PDF slip via WhatsApp:', err);
-      setIsSendingWhatsApp(false);
-      setShareNotice('Could not generate PDF. Opening text WhatsApp slip...');
-      const fallbackUrl = getWhatsAppPreOrderDirectUrl(preOrder, settings, customerPhone, countryCode);
-      window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
+        setShareNotice('Opening text WhatsApp slip...');
+        const fallbackUrl = getWhatsAppPreOrderDirectUrl(preOrder, settings, rawPhone, countryCode);
+        window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
+      }
+    },
+    [preOrder, settings, customerPhone, countryCode]
+  );
+
+  useEffect(() => {
+    if (isOpen && preOrder) {
+      setPdfDownloaded(false);
+      setShareNotice(null);
+      const initialPhone = preOrder.customerPhone || '';
+      setCustomerPhone(initialPhone);
+      setCountryCode('+91');
+      const cleanDigits = initialPhone.replace(/\D/g, '');
+      const hasValidPhone = cleanDigits.length >= 10 && cleanDigits !== '9999999999';
+      setIsEditingPhone(!hasValidPhone);
+      posAudio.playReceiptPrintSound();
+
+      // Automatically dispatch WhatsApp message and PDF slip if customer phone is present
+      const shouldAutoSend = settings.autoOpenWhatsApp !== false;
+      if (shouldAutoSend && hasValidPhone && autoDispatchedRef.current !== preOrder.id) {
+        autoDispatchedRef.current = preOrder.id;
+        const autoTimer = setTimeout(() => {
+          handleSendPdfWhatsApp(true, cleanDigits);
+        }, 400);
+        return () => clearTimeout(autoTimer);
+      }
     }
-  };
+  }, [isOpen, preOrder?.id, preOrder?.customerPhone, settings.autoOpenWhatsApp, handleSendPdfWhatsApp]);
+
+  if (!isOpen || !preOrder) return null;
+
+  const isCompleted = preOrder.status === 'completed';
+  const isCancelled = preOrder.status === 'cancelled';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-150">
@@ -509,9 +537,11 @@ export const PreOrderSlipModal: React.FC<PreOrderSlipModalProps> = ({
             <button
               type="button"
               onClick={handlePrint}
-              className="px-3 py-2 bg-[#12203d] hover:bg-[#182a52] text-slate-300 border border-[#1b2b48] rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+              disabled={isPrintingSlip}
+              className="px-3 py-2 bg-[#12203d] hover:bg-[#182a52] text-slate-300 border border-[#1b2b48] rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
             >
-              <Printer className="w-3.5 h-3.5 text-slate-400" /> Print
+              <Printer className={`w-3.5 h-3.5 text-slate-400 ${isPrintingSlip ? 'animate-spin' : ''}`} />
+              <span>{isPrintingSlip ? 'Printing...' : 'Print'}</span>
             </button>
           </div>
 

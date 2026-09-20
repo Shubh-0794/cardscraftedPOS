@@ -20,6 +20,7 @@ import {
   Clock,
   IndianRupee,
   FileDown,
+  Trash2,
 } from 'lucide-react';
 
 export type TimeRangeFilter = 'today' | 'weekly' | 'monthly' | 'yearly' | 'all';
@@ -31,6 +32,7 @@ interface SalesHistoryModalProps {
   invoices: Invoice[];
   settings: StoreSettings;
   onSelectInvoice: (invoice: Invoice) => void;
+  onDeleteInvoice?: (invoiceId: string) => void;
 }
 
 export const SalesHistoryModal: React.FC<SalesHistoryModalProps> = ({
@@ -39,11 +41,13 @@ export const SalesHistoryModal: React.FC<SalesHistoryModalProps> = ({
   invoices,
   settings,
   onSelectInvoice,
+  onDeleteInvoice,
 }) => {
   const [search, setSearch] = useState('');
   const [timeRange, setTimeRange] = useState<TimeRangeFilter>('today');
   const [sortBy, setSortBy] = useState<SortOption>('date-desc');
   const [filterMethod, setFilterMethod] = useState<string>('all');
+  const [deletingInvoice, setDeletingInvoice] = useState<Invoice | null>(null);
 
   // Compute Today's Daily Sale
   const todayMetrics = useMemo(() => {
@@ -447,8 +451,21 @@ export const SalesHistoryModal: React.FC<SalesHistoryModalProps> = ({
                         }}
                         className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md shadow-blue-900/30 cursor-pointer"
                       >
-                        <FileText className="w-3.5 h-3.5" /> View Receipt
+                        <FileText className="w-3.5 h-3.5" /> View
                       </button>
+                      {onDeleteInvoice && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeletingInvoice(inv);
+                          }}
+                          className="p-2 rounded-xl bg-[#101d36] hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 border border-[#1b2b48] hover:border-rose-500/30 transition-all cursor-pointer"
+                          title="Delete Invoice"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -464,6 +481,53 @@ export const SalesHistoryModal: React.FC<SalesHistoryModalProps> = ({
             </div>
           )}
         </div>
+
+        {/* Delete Invoice Confirmation Modal */}
+        {deletingInvoice && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-xs animate-in fade-in">
+            <div className="bg-[#0c1427] border border-rose-500/40 rounded-3xl p-5 max-w-sm w-full space-y-4 shadow-2xl text-center">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="font-bold text-sm text-slate-100">
+                  Delete Invoice #{deletingInvoice.invoiceNumber}?
+                </h4>
+                <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                  Are you sure you want to delete this invoice of{' '}
+                  <strong className="text-slate-200">
+                    {formatCurrency(deletingInvoice.grandTotal, settings.currencySymbol)}
+                  </strong>{' '}
+                  for <strong className="text-slate-200">{deletingInvoice.customer.name || 'Walk-in'}</strong>?
+                </p>
+                <p className="text-[11px] text-rose-400/80 font-mono mt-1">
+                  This will delete the invoice permanently from Supabase database and ledger.
+                </p>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeletingInvoice(null)}
+                  className="flex-1 py-2.5 bg-[#16233b] hover:bg-[#1e2f4f] text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onDeleteInvoice && deletingInvoice) {
+                      onDeleteInvoice(deletingInvoice.id);
+                      setDeletingInvoice(null);
+                    }
+                  }}
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-rose-950/40 cursor-pointer"
+                >
+                  Confirm Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Modal Footer */}
         <div className="px-5 py-3 border-t border-[#1b2b48] bg-[#080e1b] flex items-center justify-between text-xs">

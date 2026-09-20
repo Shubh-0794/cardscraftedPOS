@@ -45,6 +45,7 @@ import {
   deleteCustomerFromSupabase,
   deleteProductFromSupabase,
   deletePreOrderFromSupabase,
+  deleteInvoiceFromSupabase,
   saveAppDataToSupabase,
   CLIENT_INSTANCE_ID,
 } from './lib/supabase';
@@ -129,6 +130,7 @@ export default function App() {
   // History tab filtering and sorting
   const [historyTabRange, setHistoryTabRange] = useState<'today' | 'weekly' | 'monthly' | 'yearly' | 'all'>('today');
   const [historyTabSort, setHistoryTabSort] = useState<'date-desc' | 'amount-desc'>('date-desc');
+  const [deletingHistoryInvoice, setDeletingHistoryInvoice] = useState<Invoice | null>(null);
 
   // Identify highest purchase customer for People tab
   const highestSpenderCustomer = useMemo(() => {
@@ -533,6 +535,27 @@ export default function App() {
     deletePreOrderFromSupabase(id, nextList).catch((err) =>
       console.warn('[Supabase] Pre-order delete note:', err)
     );
+  }, []);
+
+  const handleDeleteInvoice = useCallback((id: string) => {
+    let nextList: Invoice[] = [];
+    setInvoices((prev) => {
+      nextList = prev.filter((inv) => inv.id !== id);
+      try {
+        localStorage.setItem('nexus_pos_invoices', JSON.stringify(nextList));
+      } catch (e) {
+        console.warn('Failed to save invoices to localStorage:', e);
+      }
+      return nextList;
+    });
+
+    // Immediately delete from dedicated Supabase invoices table and app_data snapshot
+    deleteInvoiceFromSupabase(id, nextList).catch((err) =>
+      console.warn('[Supabase] Invoice delete note:', err)
+    );
+
+    // If current active invoice is the deleted one, close modal
+    setCurrentInvoice((curr) => (curr?.id === id ? null : curr));
   }, []);
 
   const handleUpdatePreOrderStatus = useCallback((id: string, status: PreOrder['status']) => {
@@ -1470,7 +1493,7 @@ export default function App() {
                         }}
                         className="bg-[#0b1325] hover:bg-[#101b33] border border-[#1a2b47] hover:border-blue-500/50 rounded-2xl p-3 flex items-center justify-between cursor-pointer transition-colors group"
                       >
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1 pr-2">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-bold text-xs font-mono text-blue-400">
                               #{inv.invoiceNumber}
@@ -1497,14 +1520,27 @@ export default function App() {
                             <span>{inv.items.length} items</span>
                           </div>
                         </div>
-                        <div className="text-right shrink-0">
-                          <span className="font-bold text-xs font-mono text-slate-100 block">
-                            {settings.currencySymbol}
-                            {inv.grandTotal.toFixed(2)}
-                          </span>
-                          <span className="text-[10px] text-blue-400 font-semibold group-hover:underline">
-                            View Receipt &rarr;
-                          </span>
+                        <div className="flex items-center gap-2.5 shrink-0">
+                          <div className="text-right">
+                            <span className="font-bold text-xs font-mono text-slate-100 block">
+                              {settings.currencySymbol}
+                              {inv.grandTotal.toFixed(2)}
+                            </span>
+                            <span className="text-[10px] text-blue-400 font-semibold group-hover:underline">
+                              View Receipt &rarr;
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeletingHistoryInvoice(inv);
+                            }}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/30 transition-colors cursor-pointer"
+                            title="Delete Invoice"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
                     );
@@ -1522,6 +1558,51 @@ export default function App() {
                   </div>
                 )}
               </div>
+
+              {/* History Tab Delete Invoice Confirmation Modal */}
+              {deletingHistoryInvoice && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-xs animate-in fade-in">
+                  <div className="bg-[#0c1427] border border-rose-500/40 rounded-3xl p-5 max-w-sm w-full space-y-4 shadow-2xl text-center">
+                    <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
+                      <Trash2 className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-100">
+                        Delete Invoice #{deletingHistoryInvoice.invoiceNumber}?
+                      </h4>
+                      <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                        Are you sure you want to delete invoice of{' '}
+                        <strong className="text-slate-200">
+                          {settings.currencySymbol}{deletingHistoryInvoice.grandTotal.toFixed(2)}
+                        </strong>{' '}
+                        for <strong className="text-slate-200">{deletingHistoryInvoice.customer.name || 'Walk-in'}</strong>?
+                      </p>
+                      <p className="text-[11px] text-rose-400/80 font-mono mt-1">
+                        This will be permanently removed from Supabase and local ledger.
+                      </p>
+                    </div>
+                    <div className="flex gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setDeletingHistoryInvoice(null)}
+                        className="flex-1 py-2.5 bg-[#16233b] hover:bg-[#1e2f4f] text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleDeleteInvoice(deletingHistoryInvoice.id);
+                          setDeletingHistoryInvoice(null);
+                        }}
+                        className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-rose-950/40 cursor-pointer"
+                      >
+                        Confirm Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1553,6 +1634,7 @@ export default function App() {
         onClose={() => setIsInvoiceModalOpen(false)}
         onUpdateWhatsAppStatus={handleUpdateWhatsAppStatus}
         onViewBarcode={handleOpenBarcodeViewer}
+        onDeleteInvoice={handleDeleteInvoice}
       />
 
       {/* 3. Parked / Held Bills Queue Modal */}
@@ -1575,6 +1657,7 @@ export default function App() {
           setCurrentInvoice(inv);
           setIsInvoiceModalOpen(true);
         }}
+        onDeleteInvoice={handleDeleteInvoice}
       />
 
       {/* 5. Inventory & QR Master Modal */}

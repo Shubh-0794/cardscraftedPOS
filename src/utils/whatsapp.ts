@@ -12,6 +12,34 @@ export interface WhatsAppMessagePayloads {
 }
 
 /**
+ * Accurately standardizes phone numbers with country codes for WhatsApp wa.me links
+ * Prevents duplicate country codes (e.g. 91919767908425) and strips leading zeros.
+ */
+export function formatWhatsAppFullNumber(phone: string, countryCode: string = '+91'): string {
+  const digits = (phone || '').replace(/\D/g, '');
+  if (!digits || digits === '9999999999') return '';
+  const cleanCountry = (countryCode || '+91').replace(/\D/g, '') || '91';
+
+  // If already prefixed with 91 (e.g. 12 digits: 919767908425)
+  if (digits.length === 12 && digits.startsWith(cleanCountry)) {
+    return digits;
+  }
+  // If 11 digits starting with 0 (e.g. 09767908425)
+  if (digits.length === 11 && digits.startsWith('0')) {
+    return `${cleanCountry}${digits.slice(1)}`;
+  }
+  // Standard 10 digit Indian mobile number
+  if (digits.length === 10) {
+    return `${cleanCountry}${digits}`;
+  }
+  // If it already starts with country code
+  if (digits.startsWith(cleanCountry) && digits.length > cleanCountry.length) {
+    return digits;
+  }
+  return `${cleanCountry}${digits}`;
+}
+
+/**
  * Resolves current live app URL for shareable links
  */
 export function getAppBaseUrl(): string {
@@ -120,10 +148,7 @@ export function generateWhatsAppPayloads(
   // Phone number normalization strictly targeting customer
   const targetCountry = overrideCountryCode || invoice.customer.countryCode || '+91';
   const targetPhoneNum = overridePhone !== undefined ? overridePhone : invoice.customer.phone;
-
-  const cleanCountryCode = targetCountry.replace(/\D/g, '') || '91';
-  const cleanPhone = (targetPhoneNum || '').replace(/\D/g, '');
-  const fullRecipientNumber = cleanPhone ? `${cleanCountryCode}${cleanPhone}` : '';
+  const fullRecipientNumber = formatWhatsAppFullNumber(targetPhoneNum, targetCountry);
 
   // 1. Direct Web WhatsApp link strictly to customer's WhatsApp chat
   const encodedText = encodeURIComponent(plainTextMessage);
@@ -230,11 +255,9 @@ export function getWhatsAppPaymentDirectUrl(
     invoiceNumber?: string;
   }
 ): string {
-  const cleanPhone = phone.replace(/\D/g, '');
-  const cleanCountryCode = countryCode.replace(/\D/g, '') || '91';
-  const fullPhone = `${cleanCountryCode}${cleanPhone}`;
+  const fullPhone = formatWhatsAppFullNumber(phone, countryCode);
   const message = buildWhatsAppPaymentLinkMessage(params);
-  return cleanPhone
+  return fullPhone
     ? `https://wa.me/${fullPhone}?text=${encodeURIComponent(message)}`
     : `https://wa.me/?text=${encodeURIComponent(message)}`;
 }
@@ -289,7 +312,20 @@ export function buildWhatsAppPreOrderMessage(
   }
 
   if (preOrder.balanceDue > 0 && settings.upiId) {
-    message += `🏦 *Pay Balance via UPI:* \`${settings.upiId}\`\n\n`;
+    const cleanUpiId = settings.upiId.trim();
+    const payeeName = settings.upiPayeeName || settings.storeName || 'Shivani Khante';
+    const cleanRef = (preOrder.orderNumber || 'PRE').replace(/[^a-zA-Z0-9]/g, '');
+    const upiDeepLink = buildUPIDeepLink({
+      upiId: cleanUpiId,
+      payeeName: payeeName,
+      amount: preOrder.balanceDue,
+      currency: settings.currencyCode || 'INR',
+      transactionNote: `Balance for Pre-Order #${preOrder.orderNumber}`,
+      transactionRef: cleanRef,
+    });
+
+    message += `💳 *Click link to Pay Balance ${symbol}${preOrder.balanceDue.toFixed(2)} via UPI:*\n${upiDeepLink}\n\n`;
+    message += `🏦 *Pay Balance via UPI:* \`${cleanUpiId}\`\n\n`;
   }
 
   if (includePdfNotice) {
@@ -307,11 +343,10 @@ export function getWhatsAppPreOrderDirectUrl(
   overrideCountryCode?: string
 ): string {
   const targetPhone = overridePhone !== undefined ? overridePhone : (preOrder.customerPhone || '');
-  const cleanPhone = targetPhone.replace(/\D/g, '');
-  const country = (overrideCountryCode || '+91').replace(/\D/g, '') || '91';
-  const fullPhone = cleanPhone.length === 10 ? `${country}${cleanPhone}` : cleanPhone;
+  const country = overrideCountryCode || '+91';
+  const fullPhone = formatWhatsAppFullNumber(targetPhone, country);
   const message = buildWhatsAppPreOrderMessage(preOrder, settings, true);
-  return cleanPhone
+  return fullPhone
     ? `https://wa.me/${fullPhone}?text=${encodeURIComponent(message)}`
     : `https://wa.me/?text=${encodeURIComponent(message)}`;
 }

@@ -13,6 +13,7 @@ import {
   ExternalLink,
   ShieldCheck,
   Wrench,
+  MessageSquare,
 } from 'lucide-react';
 import {
   SUPABASE_URL,
@@ -279,6 +280,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onChange={(e) => setFormData({ ...formData, invoiceFooterNote: e.target.value })}
                 className="w-full bg-transparent text-slate-100 focus:outline-none mt-0.5"
               />
+            </div>
+
+            {/* Auto WhatsApp PDF Dispatch Switch */}
+            <div className="bg-[#0a101d] border border-emerald-500/30 rounded-xl p-3.5 flex items-center justify-between">
+              <div className="space-y-0.5 pr-2">
+                <div className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                  <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Auto-Send PDF to Customer WhatsApp</span>
+                </div>
+                <p className="text-[10.5px] text-slate-400 leading-snug">
+                  Automatically generate high-res PDF invoice and send to customer's WhatsApp on payment completion.
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                <input
+                  type="checkbox"
+                  checked={formData.autoOpenWhatsApp !== false}
+                  onChange={(e) => setFormData({ ...formData, autoOpenWhatsApp: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+              </label>
             </div>
 
             <div className="pt-3 border-t border-[#1b2b48] flex gap-2">
