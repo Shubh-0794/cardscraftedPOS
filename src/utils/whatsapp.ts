@@ -311,7 +311,13 @@ export function buildWhatsAppPreOrderMessage(
     message += `📝 *Notes/Specs:* ${preOrder.notes}\n\n`;
   }
 
-  if (preOrder.balanceDue > 0 && settings.upiId) {
+  // Only pending balance amount has a payment URL (not other amounts, and not when fully paid)
+  if (
+    preOrder.balanceDue > 0 &&
+    preOrder.status !== 'completed' &&
+    preOrder.status !== 'cancelled' &&
+    settings.upiId
+  ) {
     const cleanUpiId = settings.upiId.trim();
     const payeeName = settings.upiPayeeName || settings.storeName || 'Shivani Khante';
     const cleanRef = (preOrder.orderNumber || 'PRE').replace(/[^a-zA-Z0-9]/g, '');
