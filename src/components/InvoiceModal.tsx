@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Invoice, StoreSettings } from '../types/pos';
 import { formatCurrency } from '../utils/taxCalculator';
 import { generateWhatsAppPayloads, formatWhatsAppFullNumber } from '../utils/whatsapp';
+import { executeCompleteWhatsAppDispatch, formatIndianWhatsAppNumber } from '../services/whatsapp';
+import { updateInvoiceWhatsAppStatusInSupabase } from '../lib/supabase';
 import { posAudio } from '../utils/audio';
 import { generateInvoicePdf, createInvoicePdfBlob } from '../utils/qrPdfGenerator';
 import { printInvoiceReceipt } from '../utils/printReceipt';
@@ -10,6 +12,7 @@ import {
   Send,
   X,
   CheckCircle2,
+  AlertCircle,
   RefreshCw,
   FileDown,
   Check,
@@ -27,7 +30,11 @@ interface InvoiceModalProps {
   settings: StoreSettings;
   isOpen: boolean;
   onClose: () => void;
-  onUpdateWhatsAppStatus: (invoiceId: string, status: 'sent' | 'failed') => void;
+  onUpdateWhatsAppStatus: (
+    invoiceId: string,
+    status: 'sent' | 'failed' | 'pending',
+    details?: { messageId?: string; error?: string; invoicePath?: string; documentUrl?: string }
+  ) => void;
   onViewBarcode?: (barcode: string, name: string, price?: number, sku?: string, category?: string) => void;
   onDeleteInvoice?: (invoiceId: string) => void;
 }
@@ -47,7 +54,8 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [pdfDownloaded, setPdfDownloaded] = useState(false);
   const [shareNotice, setShareNotice] = useState<string | null>(null);
-  const [autoDispatchStatus, setAutoDispatchStatus] = useState<'idle' | 'auto_sending' | 'auto_sent' | 'failed'>('idle');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [deliveryStatus, setDeliveryStatus] = useState<'pending' | 'sent' | 'failed'>('pending');
   const [animationKey, setAnimationKey] = useState<number>(0);
   const [isPrintingAnim, setIsPrintingAnim] = useState(true);
 
@@ -59,80 +67,70 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
   // Track auto-dispatched invoices to prevent duplicate loops
   const autoDispatchedRef = useRef<string | null>(null);
 
-  // Dispatch PDF directly to Customer WhatsApp number (Strictly customer only, no e-bill link)
+  // Dispatch PDF directly to Customer WhatsApp (Supabase Storage -> Netlify Function -> WhatsApp Cloud API)
   const handleDispatchWhatsAppPdf = useCallback(
     async (isAutoTrigger = false, overrideTargetPhone?: string) => {
       if (!invoice) return;
 
       const rawPhone = overrideTargetPhone !== undefined ? overrideTargetPhone : customerPhone;
-      const cleanPhoneDigits = rawPhone.replace(/\D/g, '');
-
-      if (!cleanPhoneDigits || cleanPhoneDigits === '9999999999' || cleanPhoneDigits.length < 5) {
+      let formattedPhone = '';
+      try {
+        formattedPhone = formatIndianWhatsAppNumber(rawPhone);
+      } catch {
         setIsEditingPhone(true);
-        setShareNotice('Enter customer mobile number to auto-send PDF invoice');
+        setShareNotice('Enter valid 10-digit customer mobile number');
         return;
       }
 
       setIsSendingWhatsApp(true);
-      if (isAutoTrigger) {
-        setAutoDispatchStatus('auto_sending');
-      }
       setShareNotice(null);
+      setErrorMessage(null);
 
       try {
-        // Cleaned full international phone representation for customer
-        const fullCustomerNumber = formatWhatsAppFullNumber(rawPhone, countryCode);
+        // Execute complete pipeline: PDF Gen -> Supabase Storage Upload -> Netlify Function WhatsApp Cloud API
+        const dispatchResult = await executeCompleteWhatsAppDispatch(invoice, settings, {
+          customPhone: formattedPhone,
+        });
 
-        // 1. Build high-fidelity PDF blob & File for attachment
-        const { doc, file, filename } = await createInvoicePdfBlob(invoice, settings);
+        if (dispatchResult.success) {
+          setDeliveryStatus('sent');
+          onUpdateWhatsAppStatus(invoice.id, 'sent', {
+            messageId: dispatchResult.messageId,
+            documentUrl: dispatchResult.documentUrl,
+            invoicePath: dispatchResult.invoicePath,
+          });
+          updateInvoiceWhatsAppStatusInSupabase(invoice.id, 'sent', {
+            messageId: dispatchResult.messageId,
+            documentUrl: dispatchResult.documentUrl,
+            invoicePath: dispatchResult.invoicePath,
+          });
 
-        // 2. Check if native Web Share with Files is supported (Android/iOS/Chrome Mobile) - only on explicit user gesture
-        if (!isAutoTrigger && typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({
-              files: [file],
-              title: `Invoice #${invoice.invoiceNumber} - ${settings.storeName}`,
-              text: `🧾 Tax Invoice #${invoice.invoiceNumber} from ${settings.storeName}\nCustomer: ${invoice.customer.name || 'Valued Customer'}\nTotal: ${formatCurrency(invoice.grandTotal, settings.currencySymbol)}\n📎 PDF Invoice attached.`,
-            });
-            onUpdateWhatsAppStatus(invoice.id, 'sent');
-            setPdfDownloaded(true);
-            posAudio.playSuccessChime();
-            setIsSendingWhatsApp(false);
-            setAutoDispatchStatus('auto_sent');
-            setShareNotice(`⚡ PDF Invoice automatically sent to customer's WhatsApp (+${fullCustomerNumber})!`);
-            return;
-          } catch (shareErr: any) {
-            if (shareErr.name === 'AbortError') {
-              setIsSendingWhatsApp(false);
-              return;
-            }
-            console.warn('Native file share fallback:', shareErr);
-          }
+          posAudio.playSuccessChime();
+          setShareNotice(
+            dispatchResult.method === 'cloud_api'
+              ? `⚡ Invoice PDF automatically delivered to WhatsApp (+${formattedPhone})!`
+              : `⚡ Invoice ready on WhatsApp (+${formattedPhone})!`
+          );
+        } else {
+          setDeliveryStatus('failed');
+          setErrorMessage(dispatchResult.error || 'WhatsApp delivery failed. You can retry or open in WhatsApp directly.');
+          onUpdateWhatsAppStatus(invoice.id, 'failed', {
+            error: dispatchResult.error,
+            invoicePath: dispatchResult.invoicePath,
+            documentUrl: dispatchResult.documentUrl,
+          });
+          updateInvoiceWhatsAppStatusInSupabase(invoice.id, 'failed', {
+            error: dispatchResult.error,
+            invoicePath: dispatchResult.invoicePath,
+            documentUrl: dispatchResult.documentUrl,
+          });
         }
-
-        // Auto or Fallback: Download PDF directly and open customer WhatsApp chat
-        doc.save(filename);
-        setPdfDownloaded(true);
-        posAudio.playSuccessChime();
-
-        // Target strictly the customer's WhatsApp chat URL
-        const payloads = generateWhatsAppPayloads(invoice, settings, rawPhone, countryCode);
-        const customerWaMeUrl = payloads.waMeLink;
-        
-        // Open customer WhatsApp chat window
-        window.open(customerWaMeUrl, '_blank', 'noopener,noreferrer');
-
-        onUpdateWhatsAppStatus(invoice.id, 'sent');
-        setAutoDispatchStatus('auto_sent');
-        setShareNotice(`⚡ PDF Invoice automatically opened for WhatsApp (+${fullCustomerNumber})!`);
-
-        setTimeout(() => {
-          setIsSendingWhatsApp(false);
-        }, 800);
-      } catch (err) {
+      } catch (err: any) {
         console.error('Error in WhatsApp PDF dispatch:', err);
+        setDeliveryStatus('failed');
+        setErrorMessage(err.message || 'WhatsApp sending failed');
+      } finally {
         setIsSendingWhatsApp(false);
-        setAutoDispatchStatus('failed');
       }
     },
     [invoice, customerPhone, countryCode, settings, onUpdateWhatsAppStatus]
@@ -145,7 +143,10 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
       setIsPrintingAnim(true);
       setPdfDownloaded(false);
       setShareNotice(null);
-      setAutoDispatchStatus('idle');
+      setErrorMessage(null);
+
+      const initialStatus = invoice.whatsappStatus || (invoice.whatsappDispatchStatus === 'sent' ? 'sent' : 'pending');
+      setDeliveryStatus(initialStatus as any);
 
       const initialPhone = invoice.customer.phone || '';
       const initialCountry = invoice.customer.countryCode || '+91';
@@ -163,7 +164,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
 
       // AUTOMATIC PDF DISPATCH TO CUSTOMER'S WHATSAPP ON PAYMENT COMPLETION
       const shouldAutoSend = settings.autoOpenWhatsApp !== false;
-      if (shouldAutoSend && hasValidPhone && autoDispatchedRef.current !== invoice.id) {
+      if (shouldAutoSend && hasValidPhone && autoDispatchedRef.current !== invoice.id && initialStatus !== 'sent') {
         autoDispatchedRef.current = invoice.id;
         const autoTimer = setTimeout(() => {
           handleDispatchWhatsAppPdf(true, cleanDigits);
@@ -528,11 +529,21 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
                 </div>
               ) : (
                 <div className="min-w-0 flex-1">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono flex items-center gap-1">
-                    <span>Customer's WhatsApp:</span>
-                    {autoDispatchStatus === 'auto_sent' && (
-                      <span className="text-emerald-400 font-semibold flex items-center gap-0.5">
-                        <Check className="w-3 h-3" /> Auto-Sent
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono flex items-center gap-1.5">
+                    <span>WhatsApp Invoice:</span>
+                    {deliveryStatus === 'sent' && (
+                      <span className="text-emerald-400 font-semibold flex items-center gap-0.5 bg-emerald-950/80 px-1.5 py-0.2 rounded border border-emerald-500/30">
+                        <Check className="w-3 h-3" /> Sent
+                      </span>
+                    )}
+                    {deliveryStatus === 'failed' && (
+                      <span className="text-rose-400 font-semibold flex items-center gap-0.5 bg-rose-950/80 px-1.5 py-0.2 rounded border border-rose-500/30">
+                        <AlertCircle className="w-3 h-3" /> Delivery Failed
+                      </span>
+                    )}
+                    {deliveryStatus === 'pending' && (
+                      <span className="text-amber-400 font-semibold flex items-center gap-0.5 bg-amber-950/80 px-1.5 py-0.2 rounded border border-amber-500/30">
+                        Pending
                       </span>
                     )}
                   </div>
@@ -563,6 +574,23 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
           </div>
         )}
 
+        {/* Error Notification Banner with Retry Option */}
+        {errorMessage && (
+          <div className="px-4 py-2.5 bg-rose-950/80 border-t border-rose-500/40 text-rose-300 text-xs flex items-center justify-between gap-2 font-mono shrink-0 animate-in fade-in duration-200">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              <span className="truncate text-[11px]">{errorMessage}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleDispatchWhatsAppPdf(false)}
+              className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[10px] font-bold shrink-0 uppercase transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {/* Action Buttons - PDF & WhatsApp First */}
         <div className="p-4 border-t border-[#1b2b48] bg-[#090f1c] space-y-2 shrink-0">
           {/* Primary Button: Send or Resend PDF directly to Customer WhatsApp */}
@@ -570,18 +598,24 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
             type="button"
             onClick={() => handleDispatchWhatsAppPdf(false)}
             disabled={isSendingWhatsApp}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white rounded-2xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/40 transition-all cursor-pointer"
+            className={`w-full py-3 text-white rounded-2xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer ${
+              deliveryStatus === 'failed'
+                ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-950/40'
+                : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/40'
+            }`}
             title={`Send PDF invoice directly to customer's WhatsApp (${customerPhone || 'phone'})`}
           >
-            <Send className="w-4 h-4" />
+            {deliveryStatus === 'failed' ? <RefreshCw className={`w-4 h-4 ${isSendingWhatsApp ? 'animate-spin' : ''}`} /> : <Send className="w-4 h-4" />}
             <span>
               {isSendingWhatsApp
-                ? 'Preparing & Sending PDF...'
-                : autoDispatchStatus === 'auto_sent'
-                ? `Resend PDF to WhatsApp (${countryCode} ${customerPhone})`
+                ? 'Preparing & Sending via Cloud API...'
+                : deliveryStatus === 'sent'
+                ? `Resend WhatsApp Invoice (+${customerPhone})`
+                : deliveryStatus === 'failed'
+                ? `Retry WhatsApp Invoice (+${customerPhone})`
                 : customerPhone
-                ? `Send PDF to WhatsApp (${countryCode} ${customerPhone})`
-                : 'Send PDF to Customer WhatsApp'}
+                ? `Send WhatsApp Invoice (+${customerPhone})`
+                : 'Send Invoice to WhatsApp'}
             </span>
           </button>
 

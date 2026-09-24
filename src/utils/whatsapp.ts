@@ -330,7 +330,7 @@ export function buildWhatsAppPreOrderMessage(
       transactionRef: cleanRef,
     });
 
-    message += `💳 *Click link to Pay Balance ${symbol}${preOrder.balanceDue.toFixed(2)} via UPI:*\n${upiDeepLink}\n\n`;
+    message += `💳 *Click link to Pay Balance ${symbol}${preOrder.balanceDue.toFixed(2)} via UPI\n\n`;
     message += `🏦 *Pay Balance via UPI:* \`${cleanUpiId}\`\n\n`;
   }
 

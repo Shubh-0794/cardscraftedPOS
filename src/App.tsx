@@ -1129,12 +1129,34 @@ export default function App() {
   };
 
   // Update WhatsApp status
-  const handleUpdateWhatsAppStatus = (invoiceId: string, status: 'sent' | 'failed') => {
+  const handleUpdateWhatsAppStatus = (
+    invoiceId: string,
+    status: 'sent' | 'failed' | 'pending',
+    details?: { messageId?: string; error?: string; invoicePath?: string; documentUrl?: string }
+  ) => {
     setInvoices((prev) =>
-      prev.map((inv) => (inv.id === invoiceId ? { ...inv, whatsappDispatchStatus: status } : inv))
+      prev.map((inv) =>
+        inv.id === invoiceId
+          ? {
+              ...inv,
+              whatsappStatus: status,
+              whatsappDispatchStatus: status === 'sent' ? 'sent' : status === 'failed' ? 'failed' : 'not_sent',
+              whatsappMessageId: details?.messageId || inv.whatsappMessageId,
+              whatsappError: details?.error || inv.whatsappError,
+              invoicePath: details?.invoicePath || inv.invoicePath,
+            }
+          : inv
+      )
     );
     if (currentInvoice && currentInvoice.id === invoiceId) {
-      setCurrentInvoice({ ...currentInvoice, whatsappDispatchStatus: status });
+      setCurrentInvoice({
+        ...currentInvoice,
+        whatsappStatus: status,
+        whatsappDispatchStatus: status === 'sent' ? 'sent' : status === 'failed' ? 'failed' : 'not_sent',
+        whatsappMessageId: details?.messageId || currentInvoice.whatsappMessageId,
+        whatsappError: details?.error || currentInvoice.whatsappError,
+        invoicePath: details?.invoicePath || currentInvoice.invoicePath,
+      });
     }
   };
 

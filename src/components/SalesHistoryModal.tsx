@@ -2,6 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { Invoice, StoreSettings } from '../types/pos';
 import { formatCurrency } from '../utils/taxCalculator';
 import { generateWhatsAppPayloads } from '../utils/whatsapp';
+import { executeCompleteWhatsAppDispatch } from '../services/whatsapp';
+import { updateInvoiceWhatsAppStatusInSupabase } from '../lib/supabase';
 import { createInvoicePdfBlob } from '../utils/qrPdfGenerator';
 import { posAudio } from '../utils/audio';
 import {
@@ -21,6 +23,10 @@ import {
   IndianRupee,
   FileDown,
   Trash2,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  Check,
 } from 'lucide-react';
 
 export type TimeRangeFilter = 'today' | 'weekly' | 'monthly' | 'yearly' | 'all';
@@ -48,6 +54,8 @@ export const SalesHistoryModal: React.FC<SalesHistoryModalProps> = ({
   const [sortBy, setSortBy] = useState<SortOption>('date-desc');
   const [filterMethod, setFilterMethod] = useState<string>('all');
   const [deletingInvoice, setDeletingInvoice] = useState<Invoice | null>(null);
+  const [dispatchingId, setDispatchingId] = useState<string | null>(null);
+  const [dispatchSuccessId, setDispatchSuccessId] = useState<string | null>(null);
 
   // Compute Today's Daily Sale
   const todayMetrics = useMemo(() => {
@@ -138,50 +146,32 @@ export const SalesHistoryModal: React.FC<SalesHistoryModalProps> = ({
 
   if (!isOpen) return null;
 
-  const [dispatchingId, setDispatchingId] = useState<string | null>(null);
-
   const handleQuickSendWA = async (invoice: Invoice) => {
     setDispatchingId(invoice.id);
     try {
-      const { doc, file, filename } = await createInvoicePdfBlob(invoice, settings);
-      const cleanDigits = (invoice.customer.phone || '').replace(/\D/g, '');
-      const cleanCountry = (invoice.customer.countryCode || '+91').replace(/\D/g, '') || '91';
-      const fullPhone = cleanDigits ? `${cleanCountry}${cleanDigits}` : '';
-
-      const canNativeShareFiles =
-        typeof navigator !== 'undefined' &&
-        navigator.canShare &&
-        navigator.canShare({ files: [file] });
-
-      if (canNativeShareFiles) {
-        try {
-          await navigator.share({
-            files: [file],
-            title: `Invoice #${invoice.invoiceNumber} - ${settings.storeName}`,
-            text: `🧾 Tax Invoice #${invoice.invoiceNumber} from ${settings.storeName}\nCustomer: ${invoice.customer.name || 'Valued Customer'}\nTotal: ${formatCurrency(invoice.grandTotal, settings.currencySymbol)}\n📎 PDF Invoice attached.`,
-          });
-          posAudio.playSuccessChime();
-          setDispatchingId(null);
-          return;
-        } catch (e: any) {
-          if (e.name === 'AbortError') {
-            setDispatchingId(null);
-            return;
-          }
-        }
+      const result = await executeCompleteWhatsAppDispatch(invoice, settings);
+      if (result.success) {
+        posAudio.playSuccessChime();
+        setDispatchSuccessId(invoice.id);
+        updateInvoiceWhatsAppStatusInSupabase(invoice.id, 'sent', {
+          messageId: result.messageId,
+          documentUrl: result.documentUrl,
+          invoicePath: result.invoicePath,
+        });
+        setTimeout(() => setDispatchSuccessId(null), 3000);
+      } else {
+        updateInvoiceWhatsAppStatusInSupabase(invoice.id, 'failed', {
+          error: result.error,
+          invoicePath: result.invoicePath,
+          documentUrl: result.documentUrl,
+        });
       }
-
-      // Fallback
-      doc.save(filename);
-      posAudio.playSuccessChime();
-      const payloads = generateWhatsAppPayloads(invoice, settings);
-      window.open(payloads.waMeLink, '_blank', 'noopener,noreferrer');
     } catch (err) {
       console.error('Failed to dispatch PDF from history:', err);
       const payloads = generateWhatsAppPayloads(invoice, settings);
       window.open(payloads.waMeLink, '_blank', 'noopener,noreferrer');
     } finally {
-      setTimeout(() => setDispatchingId(null), 800);
+      setDispatchingId(null);
     }
   };
 
@@ -419,6 +409,21 @@ export const SalesHistoryModal: React.FC<SalesHistoryModalProps> = ({
                         {inv.items.length === 1 ? 'item' : 'items'} (
                         {inv.items.reduce((acc, it) => acc + it.quantity, 0)} qty)
                       </span>
+                      <span>•</span>
+                      {/* WhatsApp Delivery Status Badge */}
+                      {inv.whatsappStatus === 'sent' || inv.whatsappDispatchStatus === 'sent' ? (
+                        <span className="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-400 text-[10px] font-mono font-bold rounded border border-emerald-500/30 flex items-center gap-1">
+                          <Check className="w-2.5 h-2.5" /> WhatsApp Sent
+                        </span>
+                      ) : inv.whatsappStatus === 'failed' || inv.whatsappDispatchStatus === 'failed' ? (
+                        <span className="px-1.5 py-0.2 bg-rose-500/20 text-rose-400 text-[10px] font-mono font-bold rounded border border-rose-500/30 flex items-center gap-1">
+                          <AlertCircle className="w-2.5 h-2.5" /> WhatsApp Failed
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.2 bg-slate-800 text-slate-400 text-[10px] font-mono rounded border border-slate-700">
+                          WhatsApp Pending
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -438,10 +443,28 @@ export const SalesHistoryModal: React.FC<SalesHistoryModalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleQuickSendWA(inv)}
-                        className="p-2 rounded-xl bg-[#101d36] hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-400 border border-[#1b2b48] hover:border-emerald-500/30 transition-all cursor-pointer"
-                        title="Send Receipt via WhatsApp"
+                        disabled={dispatchingId === inv.id}
+                        className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center gap-1 text-xs font-mono ${
+                          dispatchSuccessId === inv.id
+                            ? 'bg-emerald-600 text-white border-emerald-500'
+                            : inv.whatsappStatus === 'failed'
+                            ? 'bg-amber-950/60 text-amber-300 border-amber-500/40 hover:bg-amber-600 hover:text-white'
+                            : 'bg-[#101d36] hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-400 border-[#1b2b48] hover:border-emerald-500/30'
+                        }`}
+                        title={inv.whatsappStatus === 'failed' ? 'Retry WhatsApp Delivery' : 'Send WhatsApp Invoice'}
                       >
-                        <Send className="w-3.5 h-3.5" />
+                        {dispatchingId === inv.id ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                        ) : dispatchSuccessId === inv.id ? (
+                          <Check className="w-3.5 h-3.5" />
+                        ) : inv.whatsappStatus === 'failed' ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline text-[10px]">Retry</span>
+                          </>
+                        ) : (
+                          <Send className="w-3.5 h-3.5" />
+                        )}
                       </button>
                       <button
                         type="button"

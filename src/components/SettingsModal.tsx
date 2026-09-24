@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { StoreSettings } from '../types/pos';
+import { sendWhatsAppInvoice } from '../services/whatsapp';
 import {
   Settings,
   Save,
@@ -14,6 +15,11 @@ import {
   ShieldCheck,
   Wrench,
   MessageSquare,
+  Send,
+  Cloud,
+  FileText,
+  Key,
+  FolderLock,
 } from 'lucide-react';
 import {
   SUPABASE_URL,
@@ -52,9 +58,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onPullAllFromCloud,
   isSyncing = false,
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'supabase'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'supabase' | 'whatsapp'>('general');
   const [formData, setFormData] = useState<StoreSettings>(settings);
   const [savedSuccess, setSavedSuccess] = useState(false);
+
+  // WhatsApp Testing State
+  const [testPhone, setTestPhone] = useState('');
+  const [isSendingTest, setIsSendingTest] = useState(false);
+  const [testFeedback, setTestFeedback] = useState<{ success: boolean; message: string } | null>(null);
 
   // Supabase Custom Config Form
   const [customUrl, setCustomUrl] = useState(SUPABASE_URL);
@@ -97,6 +108,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       console.error('Diagnostic error:', e);
     } finally {
       setIsDiagnosing(false);
+    }
+  };
+
+  const handleTestWhatsApp = async () => {
+    if (!testPhone.trim()) {
+      setTestFeedback({ success: false, message: 'Please enter a 10-digit mobile number' });
+      return;
+    }
+    setIsSendingTest(true);
+    setTestFeedback(null);
+    try {
+      const res = await sendWhatsAppInvoice({
+        phone: testPhone,
+        customerName: 'Test Customer',
+        orderNumber: 'TEST-1001',
+        total: 100,
+        message: `Hello! 👋 This is a test invoice message from ${formData.storeName || 'Cards Crafted'} via Meta WhatsApp Cloud API Netlify Function.`,
+      });
+
+      if (res.success) {
+        setTestFeedback({
+          success: true,
+          message: `Test message sent successfully! Message ID: ${res.messageId || 'OK'}`,
+        });
+      } else {
+        setTestFeedback({
+          success: false,
+          message: res.error || 'Failed to send WhatsApp test message. Ensure Netlify environment variables are configured.',
+        });
+      }
+    } catch (err: any) {
+      setTestFeedback({ success: false, message: err.message || 'Error executing test' });
+    } finally {
+      setIsSendingTest(false);
     }
   };
 
@@ -163,11 +208,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="px-5 pt-3 pb-1 border-b border-[#1b2b48] flex gap-2">
+        <div className="px-5 pt-3 pb-1 border-b border-[#1b2b48] flex gap-2 flex-wrap">
           <button
             type="button"
             onClick={() => setActiveTab('general')}
-            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
               activeTab === 'general'
                 ? 'bg-blue-600 text-white shadow-md'
                 : 'bg-[#121e38] text-slate-400 hover:text-slate-200'
@@ -179,7 +224,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('supabase')}
-            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
               activeTab === 'supabase'
                 ? 'bg-emerald-600 text-white shadow-md'
                 : 'bg-[#121e38] text-emerald-400 hover:text-emerald-300'
@@ -188,6 +233,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <Database className="w-3.5 h-3.5" />
             <span>Supabase Cloud DB</span>
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-0.5"></span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('whatsapp')}
+            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'whatsapp'
+                ? 'bg-emerald-600 text-white shadow-md'
+                : 'bg-[#121e38] text-emerald-400 hover:text-emerald-300'
+            }`}
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span>WhatsApp Cloud API</span>
           </button>
         </div>
 
@@ -321,7 +378,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
             </div>
           </form>
-        ) : (
+        ) : activeTab === 'supabase' ? (
           /* Supabase Cloud Database Tab */
           <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
             {/* Status Banner */}
@@ -582,6 +639,204 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {showSqlSchema && (
                 <div className="mt-2 bg-[#070c17] border border-[#1b2b48] rounded-xl p-3 overflow-x-auto max-h-48 text-[10px] font-mono text-slate-300">
                   <pre>{SUPABASE_SQL_SCHEMA}</pre>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* WhatsApp Cloud API & Supabase Storage Tab */
+          <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+            {/* Architecture Banner */}
+            <div className="bg-gradient-to-r from-emerald-950/60 to-blue-950/60 border border-emerald-500/40 rounded-2xl p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
+                    <MessageSquare className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-slate-100">WhatsApp Cloud API &amp; PDF Invoices</h4>
+                    <p className="text-[11px] text-emerald-300 font-mono">Netlify Serverless + Supabase Storage</p>
+                  </div>
+                </div>
+                <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full font-mono text-[10px] font-bold">
+                  ACTIVE
+                </span>
+              </div>
+              <div className="bg-[#070d18] border border-[#1b2b48] rounded-xl p-2.5 font-mono text-[10px] text-slate-300 text-center leading-relaxed">
+                <span className="text-blue-400 font-bold">POS</span> → 
+                <span className="text-purple-400 font-bold"> Generate PDF</span> → 
+                <span className="text-emerald-400 font-bold"> Supabase Storage</span> (invoice-pdfs) → 
+                <span className="text-amber-400 font-bold"> Netlify Function</span> → 
+                <span className="text-emerald-400 font-bold"> WhatsApp Cloud API</span> → 
+                <span className="text-slate-100 font-bold"> Customer</span>
+              </div>
+            </div>
+
+            {/* Step 1: Netlify Environment Variables */}
+            <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+                  <Key className="w-3.5 h-3.5 text-blue-400" />
+                  <span>1. Netlify Environment Variables (Secrets)</span>
+                </span>
+                <a
+                  href="https://app.netlify.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] text-blue-400 hover:text-blue-300 font-mono flex items-center gap-1"
+                >
+                  <span>Netlify Dashboard</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              </div>
+              <p className="text-[10.5px] text-slate-400 leading-relaxed">
+                Add these in <span className="text-slate-200 font-mono">Netlify → Site configuration → Environment variables</span> (WhatsApp token never exposed to React browser bundle):
+              </p>
+              <div className="space-y-1.5 font-mono text-[10px]">
+                <div className="p-2 rounded-lg bg-[#070c17] border border-[#17243c] flex items-center justify-between">
+                  <span className="text-emerald-400 font-bold">WHATSAPP_ACCESS_TOKEN</span>
+                  <span className="text-slate-400">Meta System User Token</span>
+                </div>
+                <div className="p-2 rounded-lg bg-[#070c17] border border-[#17243c] flex items-center justify-between">
+                  <span className="text-emerald-400 font-bold">WHATSAPP_PHONE_NUMBER_ID</span>
+                  <span className="text-slate-400">Meta Phone Number ID</span>
+                </div>
+                <div className="p-2 rounded-lg bg-[#070c17] border border-[#17243c] flex items-center justify-between">
+                  <span className="text-emerald-400 font-bold">WHATSAPP_API_VERSION</span>
+                  <span className="text-slate-400">v20.0 (default)</span>
+                </div>
+                <div className="p-2 rounded-lg bg-[#070c17] border border-[#17243c] flex items-center justify-between">
+                  <span className="text-emerald-400 font-bold">WHATSAPP_VERIFY_TOKEN</span>
+                  <span className="text-slate-400">cards-crafted-webhook-2026</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Step 2: Meta Webhook Setup */}
+            <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+                  <MessageSquare className="w-3.5 h-3.5 text-purple-400" />
+                  <span>2. Meta Developer Portal Webhook Setup</span>
+                </span>
+                <a
+                  href="https://developers.facebook.com/apps"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] text-purple-400 hover:text-purple-300 font-mono flex items-center gap-1"
+                >
+                  <span>Meta Portal</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              </div>
+              <p className="text-[10.5px] text-slate-400 leading-relaxed">
+                In <span className="text-slate-200 font-mono">Meta App → WhatsApp → Configuration</span>, set the Webhook Callback:
+              </p>
+              <div className="space-y-2 font-mono text-[10px]">
+                <div className="p-2 rounded-lg bg-[#070c17] border border-[#17243c] flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1 truncate">
+                    <span className="text-slate-400 block text-[9px] uppercase font-bold">Callback URL:</span>
+                    <span className="text-slate-200 truncate select-all">https://cardscraftedpos.netlify.app/.netlify/functions/whatsapp-webhook</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText('https://cardscraftedpos.netlify.app/.netlify/functions/whatsapp-webhook');
+                      setSavedSuccess(true);
+                      setTimeout(() => setSavedSuccess(false), 2000);
+                    }}
+                    className="px-2 py-1 bg-[#121e38] hover:bg-[#1a2b4e] text-purple-300 rounded text-[10px] shrink-0 cursor-pointer"
+                  >
+                    Copy URL
+                  </button>
+                </div>
+                <div className="p-2 rounded-lg bg-[#070c17] border border-[#17243c] flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-slate-400 block text-[9px] uppercase font-bold">Verify Token:</span>
+                    <span className="text-purple-400 font-bold select-all">cards-crafted-webhook-2026</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText('cards-crafted-webhook-2026');
+                      setSavedSuccess(true);
+                      setTimeout(() => setSavedSuccess(false), 2000);
+                    }}
+                    className="px-2 py-1 bg-[#121e38] hover:bg-[#1a2b4e] text-purple-300 rounded text-[10px] shrink-0 cursor-pointer"
+                  >
+                    Copy Token
+                  </button>
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                👉 After clicking <span className="text-slate-200 font-bold">Verify and Save</span>, under <span className="text-slate-200 font-bold">Webhook fields</span>, subscribe to <span className="text-emerald-400 font-bold font-mono">messages</span> to receive real-time delivery confirmations.
+              </p>
+            </div>
+
+            {/* Step 3: Supabase Storage Bucket */}
+            <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+                  <FolderLock className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>3. Supabase Storage Bucket: invoice-pdfs</span>
+                </span>
+                <a
+                  href={`https://supabase.com/dashboard/project/${SUPABASE_URL.replace('https://', '').split('.')[0]}/storage/buckets`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] text-emerald-400 hover:text-emerald-300 font-mono flex items-center gap-1"
+                >
+                  <span>Open Storage</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              </div>
+              <p className="text-[10.5px] text-slate-400 leading-relaxed">
+                Create a bucket named <span className="text-emerald-300 font-mono font-bold">invoice-pdfs</span> in Supabase Storage. The POS automatically uploads PDF invoices and creates secure time-limited Signed URLs for WhatsApp delivery.
+              </p>
+            </div>
+
+            {/* Step 4: Interactive Live Tester */}
+            <div className="bg-[#0a101d] border border-emerald-500/30 rounded-xl p-3.5 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+                  <Send className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>4. Test WhatsApp Cloud API Endpoint</span>
+                </span>
+                <span className="text-[10px] font-mono text-slate-400">/.netlify/functions/send-whatsapp</span>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="tel"
+                  placeholder="Enter 10-digit test mobile (e.g. 9876543210)"
+                  value={testPhone}
+                  onChange={(e) => setTestPhone(e.target.value)}
+                  className="flex-1 bg-[#070c17] border border-[#1b2b48] rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-emerald-400"
+                />
+                <button
+                  type="button"
+                  onClick={handleTestWhatsApp}
+                  disabled={isSendingTest}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-950/40 cursor-pointer flex items-center gap-1.5 shrink-0"
+                >
+                  <Send className={`w-3.5 h-3.5 ${isSendingTest ? 'animate-spin' : ''}`} />
+                  <span>{isSendingTest ? 'Sending...' : 'Send Test'}</span>
+                </button>
+              </div>
+
+              {testFeedback && (
+                <div
+                  className={`p-2.5 rounded-xl text-[11px] font-mono flex items-center gap-2 ${
+                    testFeedback.success
+                      ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-300'
+                      : 'bg-rose-950/60 border border-rose-500/40 text-rose-300'
+                  }`}
+                >
+                  {testFeedback.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                  )}
+                  <span>{testFeedback.message}</span>
                 </div>
               )}
             </div>

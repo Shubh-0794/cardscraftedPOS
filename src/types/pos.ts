@@ -88,6 +88,12 @@ export interface Invoice {
   whatsappDispatchStatus: 'not_sent' | 'sent' | 'failed';
   whatsappDispatchedAt?: string;
   whatsappMessageId?: string;
+  // Cloud API & Supabase Storage tracking
+  invoicePath?: string;
+  whatsappStatus?: 'pending' | 'sent' | 'failed' | 'not_sent';
+  whatsappError?: string;
+  whatsappSentAt?: string;
+  whatsappDocumentUrl?: string;
   cashierName: string;
   notes?: string;
 }
@@ -112,6 +118,8 @@ export interface StoreSettings {
   whatsappApiKey?: string;
   whatsappPhoneNumberId?: string;
   whatsappBusinessAccountId?: string;
+  whatsappTemplateName?: string;
+  supabaseStorageBucket?: string;
   twilioAccountSid?: string;
   twilioAuthToken?: string;
   twilioFromNumber?: string;

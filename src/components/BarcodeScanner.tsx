@@ -19,6 +19,10 @@ import {
   Sparkles,
   Layers,
   X,
+  LayoutGrid,
+  List,
+  ShoppingCart,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { Html5Qrcode, CameraDevice } from 'html5-qrcode';
 import { ProductQrBadge } from './ProductQrBadge';
@@ -60,6 +64,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isInitializingCamera, setIsInitializingCamera] = useState(false);
@@ -616,33 +621,64 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
           </span>
         </div>
 
-        {onOpenAddProduct && (
-          <button
-            type="button"
-            onClick={onOpenAddProduct}
-            className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-md shadow-blue-900/30 transition-colors cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Add Product</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* View mode toggle: List vs Grid */}
+          <div className="flex items-center bg-[#090f1d] border border-[#1b2b48] rounded-xl p-0.5">
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              title="List View"
+              className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                viewMode === 'list'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <List className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('grid')}
+              title="Grid View"
+              className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                viewMode === 'grid'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {onOpenAddProduct && (
+            <button
+              type="button"
+              onClick={onOpenAddProduct}
+              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-md shadow-blue-900/30 transition-colors cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Product</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Product List Cards */}
-      <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+      {/* Product Display Section */}
+      <div className="max-h-[420px] overflow-y-auto pr-1">
         {filteredProducts.length > 0 ? (
-          filteredProducts.map((product, idx) => {
-            const avatarColor = AVATAR_COLORS[idx % AVATAR_COLORS.length];
-            const initial = product.name.charAt(0).toUpperCase();
-            const inCart = getInCartQty(product.id);
-            const maxStock = typeof product.stock === 'number' ? product.stock : 999;
-            const isOutOfStock = maxStock <= 0;
-            const isCartFull = inCart >= maxStock;
+          viewMode === 'grid' ? (
+            /* Grid View: Image, Name, Price, and Click to Add Button */
+            <div className="grid grid-cols-2 gap-2.5">
+              {filteredProducts.map((product, idx) => {
+                const avatarColor = AVATAR_COLORS[idx % AVATAR_COLORS.length];
+                const initial = product.name.charAt(0).toUpperCase();
+                const inCart = getInCartQty(product.id);
+                const maxStock = typeof product.stock === 'number' ? product.stock : 999;
+                const isOutOfStock = maxStock <= 0;
+                const isCartFull = inCart >= maxStock;
 
-            return (
-              <div
-                key={product.id}
-                onClick={() => {
+                const handleDirectAdd = (e: React.MouseEvent) => {
+                  e.stopPropagation();
                   if (isOutOfStock) {
                     posAudio.playStockAlertSound();
                     onStockAlert?.(`Out of Stock: "${product.name}" has 0 units in stock.`);
@@ -657,135 +693,306 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
                   }
                   posAudio.playScanBeep();
                   onAddToCart(product, 1);
-                }}
-                className={`border rounded-2xl p-3 flex items-center justify-between cursor-pointer transition-all shadow-xs group ${
-                  isOutOfStock
-                    ? 'bg-[#0a0f1d]/60 border-rose-950/40 opacity-70 hover:border-rose-700/50'
-                    : isCartFull
-                    ? 'bg-[#0d162a] border-amber-500/30 hover:border-amber-400/50'
-                    : 'bg-[#0b1325] hover:bg-[#101b33] border-[#1a2b47] hover:border-blue-500/50'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  {product.image ? (
-                    <img
-                      src={product.image}
-                      alt={product.name}
-                      referrerPolicy="no-referrer"
-                      className="w-10 h-10 rounded-xl object-cover border border-[#1b2b48] shrink-0 bg-[#15233f] shadow-xs"
-                    />
-                  ) : (
-                    <div className={`w-10 h-10 rounded-xl ${avatarColor} flex items-center justify-center font-bold text-xs shrink-0 font-mono shadow-xs`}>
-                      {initial}
+                };
+
+                return (
+                  <div
+                    key={product.id}
+                    className={`border rounded-2xl p-2.5 flex flex-col justify-between transition-all shadow-xs group relative ${
+                      isOutOfStock
+                        ? 'bg-[#0a0f1d]/70 border-rose-950/40 opacity-70'
+                        : isCartFull
+                        ? 'bg-[#0d162a] border-amber-500/30'
+                        : 'bg-[#0b1325] hover:bg-[#101b33] border-[#1a2b47] hover:border-blue-500/50'
+                    }`}
+                  >
+                    {/* Top Action Icons (Edit & Qty) */}
+                    <div className="absolute top-3.5 right-3.5 z-10 flex items-center gap-1">
+                      {onEditProduct && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditProduct(product);
+                          }}
+                          title="Edit Product"
+                          className="p-1 rounded-lg bg-black/60 backdrop-blur-xs text-slate-300 hover:text-blue-400 hover:bg-black/80 transition-colors cursor-pointer"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
-                  )}
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <h4 className="font-bold text-xs text-slate-100 truncate group-hover:text-blue-400 transition-colors">
-                        {product.name}
-                      </h4>
+
+                    {/* Product Image */}
+                    <div className="relative w-full aspect-4/3 rounded-xl overflow-hidden bg-[#14203a] border border-[#1e2f4f] mb-2 flex items-center justify-center">
+                      {product.image ? (
+                        <img
+                          src={product.image}
+                          alt={product.name}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                        />
+                      ) : (
+                        <div className={`w-full h-full ${avatarColor} flex items-center justify-center font-bold text-2xl font-mono`}>
+                          {initial}
+                        </div>
+                      )}
+
+                      {/* Stock / In-cart Badge overlay on image */}
                       {isOutOfStock ? (
-                        <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-bold bg-rose-950 text-rose-400 border border-rose-800">
+                        <span className="absolute bottom-1.5 left-1.5 text-[9px] font-mono px-1.5 py-0.5 rounded font-bold bg-rose-950/90 text-rose-300 border border-rose-700/80 backdrop-blur-xs">
                           OUT OF STOCK
                         </span>
-                      ) : (
-                        <span
-                          className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-bold border ${
-                            isCartFull
-                              ? 'bg-amber-950 text-amber-400 border-amber-800'
-                              : maxStock <= 5
-                              ? 'bg-amber-950/50 text-amber-300 border-amber-700/50'
-                              : 'bg-slate-800 text-slate-300 border-slate-700'
-                          }`}
-                        >
-                          Stock: {maxStock}
-                        </span>
-                      )}
-                      {inCart > 0 && (
-                        <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-bold bg-blue-950 text-blue-300 border border-blue-800">
+                      ) : inCart > 0 ? (
+                        <span className="absolute bottom-1.5 left-1.5 text-[9px] font-mono px-1.5 py-0.5 rounded font-bold bg-blue-900/90 text-blue-200 border border-blue-500/80 backdrop-blur-xs">
                           In Cart: {inCart}
+                        </span>
+                      ) : (
+                        <span className="absolute bottom-1.5 left-1.5 text-[9px] font-mono px-1.5 py-0.5 rounded font-bold bg-slate-900/80 text-slate-300 border border-slate-700 backdrop-blur-xs">
+                          Stock: {maxStock}
                         </span>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono mt-0.5 flex-wrap">
-                      <span>{product.category}</span>
-                      <span>•</span>
+                    {/* Product Name & Category */}
+                    <div className="space-y-1 mb-2">
+                      <h4 className="font-bold text-xs text-slate-100 line-clamp-2 min-h-[32px] group-hover:text-blue-400 transition-colors leading-snug">
+                        {product.name}
+                      </h4>
+                      <div className="text-[10px] text-slate-400 font-mono truncate">
+                        {product.category}
+                      </div>
+                    </div>
+
+                    {/* Product Price & Add Button */}
+                    <div className="pt-1.5 border-t border-[#182642] space-y-2">
+                      <div className="flex items-baseline justify-between">
+                        <span className="font-extrabold text-sm text-blue-400 font-mono">
+                          {formatCurrency(product.unitPrice, currencySymbol)}
+                        </span>
+                        {product.mrp && product.mrp > product.unitPrice && (
+                          <span className="text-[10px] font-mono text-slate-500 line-through">
+                            {formatCurrency(product.mrp, currencySymbol)}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Click to Add Button */}
+                      <button
+                        type="button"
+                        onClick={handleDirectAdd}
+                        disabled={isOutOfStock}
+                        className={`w-full py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer ${
+                          isOutOfStock
+                            ? 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
+                            : isCartFull
+                            ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/30 active:scale-95'
+                            : inCart > 0
+                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30 active:scale-95'
+                            : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/40 active:scale-95'
+                        }`}
+                        title="Click to Add Product to Cart"
+                      >
+                        <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span>
+                          {isOutOfStock
+                            ? 'Out of Stock'
+                            : inCart > 0
+                            ? `+ Add (${inCart})`
+                            : 'Click to Add'}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            /* List View: Image, Name, Price, and Click to Add Button */
+            <div className="space-y-2.5">
+              {filteredProducts.map((product, idx) => {
+                const avatarColor = AVATAR_COLORS[idx % AVATAR_COLORS.length];
+                const initial = product.name.charAt(0).toUpperCase();
+                const inCart = getInCartQty(product.id);
+                const maxStock = typeof product.stock === 'number' ? product.stock : 999;
+                const isOutOfStock = maxStock <= 0;
+                const isCartFull = inCart >= maxStock;
+
+                const handleDirectAdd = (e?: React.MouseEvent) => {
+                  if (e) e.stopPropagation();
+                  if (isOutOfStock) {
+                    posAudio.playStockAlertSound();
+                    onStockAlert?.(`Out of Stock: "${product.name}" has 0 units in stock.`);
+                    return;
+                  }
+                  if (isCartFull) {
+                    posAudio.playStockAlertSound();
+                    onStockAlert?.(
+                      `Stock limit reached: All ${maxStock} units of "${product.name}" are already in your cart!`
+                    );
+                    return;
+                  }
+                  posAudio.playScanBeep();
+                  onAddToCart(product, 1);
+                };
+
+                return (
+                  <div
+                    key={product.id}
+                    onClick={() => handleDirectAdd()}
+                    className={`border rounded-2xl p-3 flex items-center justify-between cursor-pointer transition-all shadow-xs group ${
+                      isOutOfStock
+                        ? 'bg-[#0a0f1d]/60 border-rose-950/40 opacity-70 hover:border-rose-700/50'
+                        : isCartFull
+                        ? 'bg-[#0d162a] border-amber-500/30 hover:border-amber-400/50'
+                        : 'bg-[#0b1325] hover:bg-[#101b33] border-[#1a2b47] hover:border-blue-500/50'
+                    }`}
+                  >
+                    {/* Left: Product Image & Info */}
+                    <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
+                      {/* Product Image */}
+                      <div className="relative shrink-0">
+                        {product.image ? (
+                          <img
+                            src={product.image}
+                            alt={product.name}
+                            referrerPolicy="no-referrer"
+                            className="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl object-cover border border-[#1e2f4f] bg-[#15233f] shadow-xs group-hover:scale-105 transition-transform"
+                          />
+                        ) : (
+                          <div className={`w-13 h-13 sm:w-14 sm:h-14 rounded-2xl ${avatarColor} flex items-center justify-center font-bold text-base shrink-0 font-mono shadow-xs`}>
+                            {initial}
+                          </div>
+                        )}
+                        {inCart > 0 && (
+                          <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-blue-600 text-white font-mono text-[9px] font-bold flex items-center justify-center border border-slate-900 shadow-xs">
+                            {inCart}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Product Name, Category & Stock Status */}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="font-bold text-xs sm:text-sm text-slate-100 truncate group-hover:text-blue-400 transition-colors">
+                            {product.name}
+                          </h4>
+                          {isOutOfStock ? (
+                            <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-bold bg-rose-950 text-rose-400 border border-rose-800">
+                              OUT OF STOCK
+                            </span>
+                          ) : isCartFull ? (
+                            <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-bold bg-amber-950 text-amber-400 border border-amber-800">
+                              MAX REACHED
+                            </span>
+                          ) : (
+                            <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                              Stock: {maxStock}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono mt-1 flex-wrap">
+                          <span>{product.category}</span>
+                          <span>•</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onViewBarcode?.(product.barcode, product.name, product.unitPrice, product.sku, product.category);
+                            }}
+                            className="text-slate-300 font-mono hover:text-blue-400 hover:underline transition-colors cursor-pointer"
+                            title="Click to view & download large QR Code"
+                          >
+                            QR: {product.barcode}
+                          </button>
+                          <span>•</span>
+                          <ProductQrBadge
+                            code={product.barcode}
+                            size={14}
+                            clickable={true}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onViewBarcode?.(product.barcode, product.name, product.unitPrice, product.sku, product.category);
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right: Product Price & Dedicated Click to Add Button */}
+                    <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 pl-1">
+                      <div className="text-right">
+                        <div className="font-extrabold text-xs sm:text-sm text-slate-100 font-mono group-hover:text-blue-400 transition-colors">
+                          {formatCurrency(product.unitPrice, currencySymbol)}
+                        </div>
+                        {product.mrp && product.mrp > product.unitPrice && (
+                          <div className="text-[10px] font-mono text-slate-500 line-through">
+                            {formatCurrency(product.mrp, currencySymbol)}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Quantity multi-picker button */}
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          onViewBarcode?.(product.barcode, product.name, product.unitPrice, product.sku, product.category);
+                          setQuantityModalProduct(product);
+                          const rem = Math.max(1, Math.min(1, maxStock - inCart));
+                          setModalQty(rem > 0 ? rem : 1);
+                          setModalQtyError(null);
                         }}
-                        className="text-slate-300 font-mono hover:text-blue-400 hover:underline transition-colors cursor-pointer"
-                        title="Click to view & download large QR Code"
+                        title="Select exact quantity"
+                        className="px-2 py-1.5 rounded-xl bg-[#14223d] hover:bg-indigo-600 text-indigo-300 hover:text-white text-[11px] font-bold font-mono transition-colors cursor-pointer border border-[#1d2d4e]"
                       >
-                        QR: {product.barcode}
+                        Qty
                       </button>
-                      <span>•</span>
-                      <ProductQrBadge
-                        code={product.barcode}
-                        size={15}
-                        clickable={true}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onViewBarcode?.(product.barcode, product.name, product.unitPrice, product.sku, product.category);
-                        }}
-                      />
+
+                      {onEditProduct && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditProduct(product);
+                          }}
+                          title="Edit Product"
+                          className="p-1.5 rounded-xl text-slate-400 hover:text-blue-400 hover:bg-[#152445] transition-colors cursor-pointer"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
+                      {/* Dedicated Click to Add Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => handleDirectAdd(e)}
+                        disabled={isOutOfStock}
+                        title="Click to Add"
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md cursor-pointer ${
+                          isOutOfStock
+                            ? 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed opacity-60'
+                            : isCartFull
+                            ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/30 active:scale-95'
+                            : inCart > 0
+                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30 active:scale-95'
+                            : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/40 active:scale-95'
+                        }`}
+                      >
+                        <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span className="hidden sm:inline">
+                          {isOutOfStock ? 'Sold Out' : inCart > 0 ? `Add (${inCart})` : 'Click to Add'}
+                        </span>
+                        <span className="sm:hidden">
+                          {isOutOfStock ? 'Sold' : inCart > 0 ? `+${inCart}` : 'Add'}
+                        </span>
+                      </button>
                     </div>
                   </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0 pl-2">
-                  <span className="font-bold text-xs text-slate-100 font-mono">
-                    {formatCurrency(product.unitPrice, currencySymbol)}
-                  </span>
-
-                  {/* Quantity selector button */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setQuantityModalProduct(product);
-                      const rem = Math.max(1, Math.min(1, maxStock - inCart));
-                      setModalQty(rem > 0 ? rem : 1);
-                      setModalQtyError(null);
-                    }}
-                    title="Select quantity"
-                    className="px-2 py-1 rounded-lg bg-[#14223d] hover:bg-indigo-600 text-indigo-300 hover:text-white text-[11px] font-bold font-mono transition-colors cursor-pointer border border-[#1d2d4e]"
-                  >
-                    Qty
-                  </button>
-
-                  {onEditProduct && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onEditProduct(product);
-                      }}
-                      title="Edit Product"
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-[#152445] transition-colors cursor-pointer"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-
-                  <div
-                    className={`w-7 h-7 rounded-xl flex items-center justify-center transition-colors ${
-                      isOutOfStock
-                        ? 'bg-rose-950/40 text-rose-500'
-                        : isCartFull
-                        ? 'bg-amber-950/40 text-amber-500'
-                        : 'bg-[#14223d] group-hover:bg-blue-600 text-slate-300 group-hover:text-white'
-                    }`}
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </div>
-                </div>
-              </div>
-            );
-          })
+                );
+              })}
+            </div>
+          )
         ) : (
           <div className="py-8 text-center text-slate-500 text-xs space-y-2">
             <p>No products found matching &quot;{searchQuery}&quot;</p>

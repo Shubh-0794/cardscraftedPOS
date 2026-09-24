@@ -259,6 +259,121 @@ export async function getAppDataFromSupabase<T>(key: string): Promise<T | null> 
 }
 
 /**
+ * Uploads an Invoice PDF Blob to Supabase Storage bucket ('invoice-pdfs')
+ */
+export async function uploadInvoicePdfToSupabaseStorage(
+  invoiceNumber: string,
+  pdfBlob: Blob,
+  bucket: string = 'invoice-pdfs'
+): Promise<{ success: boolean; path?: string; error?: string }> {
+  try {
+    const year = new Date().getFullYear();
+    const cleanNumber = invoiceNumber.replace(/[^a-zA-Z0-9_-]/g, '');
+    const fileName = `invoices/${year}/${cleanNumber}.pdf`;
+
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .upload(fileName, pdfBlob, {
+        contentType: 'application/pdf',
+        upsert: true,
+      });
+
+    if (error) {
+      console.warn('[Supabase Storage] Upload note:', error.message);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, path: data?.path || fileName };
+  } catch (err: any) {
+    console.warn('[Supabase Storage] Upload exception:', err);
+    return { success: false, error: err?.message || 'Storage upload error' };
+  }
+}
+
+/**
+ * Creates a secure time-limited Signed URL for a private Invoice PDF in Supabase Storage
+ */
+export async function getInvoicePdfSignedUrl(
+  fileName: string,
+  expiresInSeconds: number = 86400,
+  bucket: string = 'invoice-pdfs'
+): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(fileName, expiresInSeconds);
+
+    if (error || !data?.signedUrl) {
+      return null;
+    }
+    return data.signedUrl;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Gets a Public URL for an Invoice PDF in Supabase Storage (if bucket is public)
+ */
+export function getInvoicePdfPublicUrl(
+  fileName: string,
+  bucket: string = 'invoice-pdfs'
+): string {
+  try {
+    const { data } = supabase.storage.from(bucket).getPublicUrl(fileName);
+    return data?.publicUrl || '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Updates WhatsApp delivery status for an invoice in Supabase
+ */
+export async function updateInvoiceWhatsAppStatusInSupabase(
+  invoiceId: string,
+  status: 'sent' | 'failed' | 'pending',
+  details?: {
+    messageId?: string;
+    error?: string;
+    invoicePath?: string;
+    documentUrl?: string;
+  }
+): Promise<boolean> {
+  try {
+    const updatePayload: Record<string, any> = {
+      whatsapp_status: status,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (status === 'sent') {
+      updatePayload.whatsapp_sent_at = new Date().toISOString();
+    }
+    if (details?.messageId) {
+      updatePayload.whatsapp_message_id = details.messageId;
+    }
+    if (details?.error) {
+      updatePayload.whatsapp_error = details.error;
+    }
+    if (details?.invoicePath) {
+      updatePayload.invoice_path = details.invoicePath;
+    }
+
+    const { error } = await supabase
+      .from('invoices')
+      .update(updatePayload)
+      .eq('id', invoiceId);
+
+    if (error) {
+      console.warn('[Supabase] Note updating invoice whatsapp status:', error.message);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Directly persist a single invoice to Supabase immediately upon generation
  */
 export async function syncSingleInvoiceToSupabase(inv: Invoice, fullInvoicesList?: Invoice[]): Promise<boolean> {
@@ -275,6 +390,11 @@ export async function syncSingleInvoiceToSupabase(inv: Invoice, fullInvoicesList
         grand_total: inv.grandTotal,
         payment_method: inv.paymentMethod,
         payment_status: inv.paymentStatus,
+        invoice_path: inv.invoicePath || null,
+        whatsapp_status: inv.whatsappStatus || (inv.whatsappDispatchStatus === 'sent' ? 'sent' : 'pending'),
+        whatsapp_message_id: inv.whatsappMessageId || null,
+        whatsapp_error: inv.whatsappError || null,
+        whatsapp_sent_at: inv.whatsappSentAt || (inv.whatsappDispatchStatus === 'sent' ? inv.whatsappDispatchedAt : null),
         data: inv,
         updated_at: new Date().toISOString(),
       },
@@ -821,7 +941,15 @@ export async function fetchAllDataFromSupabase(): Promise<{
       if (invData && invData.length > 0) {
         relInvoices = invData.map((row: any) => {
           if (row.data && typeof row.data === 'object') {
-            return { ...row.data, id: row.id };
+            return {
+              ...row.data,
+              id: row.id,
+              invoicePath: row.invoice_path || row.data.invoicePath,
+              whatsappStatus: row.whatsapp_status || row.data.whatsappStatus || (row.data.whatsappDispatchStatus === 'sent' ? 'sent' : 'pending'),
+              whatsappMessageId: row.whatsapp_message_id || row.data.whatsappMessageId,
+              whatsappError: row.whatsapp_error || row.data.whatsappError,
+              whatsappSentAt: row.whatsapp_sent_at || row.data.whatsappSentAt,
+            };
           }
           return {
             id: row.id,
@@ -835,6 +963,11 @@ export async function fetchAllDataFromSupabase(): Promise<{
             grandTotal: Number(row.grand_total),
             paymentMethod: row.payment_method || 'cash',
             paymentStatus: row.payment_status || 'success',
+            invoicePath: row.invoice_path || undefined,
+            whatsappStatus: row.whatsapp_status || 'pending',
+            whatsappMessageId: row.whatsapp_message_id || undefined,
+            whatsappError: row.whatsapp_error || undefined,
+            whatsappSentAt: row.whatsapp_sent_at || undefined,
           };
         });
       }
@@ -1059,6 +1192,11 @@ CREATE TABLE IF NOT EXISTS public.invoices (
   grand_total NUMERIC(12,2) NOT NULL DEFAULT 0.00,
   payment_method TEXT NOT NULL DEFAULT 'cash',
   payment_status TEXT NOT NULL DEFAULT 'success',
+  invoice_path TEXT,
+  whatsapp_status TEXT DEFAULT 'pending',
+  whatsapp_message_id TEXT,
+  whatsapp_error TEXT,
+  whatsapp_sent_at TIMESTAMPTZ,
   data JSONB NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
