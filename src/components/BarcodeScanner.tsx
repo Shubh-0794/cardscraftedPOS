@@ -31,6 +31,9 @@ interface BarcodeScannerProps {
   products: Product[];
   cart?: CartItem[];
   onAddToCart: (product: Product, quantity?: number) => void;
+  onUpdateQuantity?: (productId: string, quantity: number) => void;
+  onRemoveItem?: (productId: string) => void;
+  onProceedToCheckout?: () => void;
   onOpenQuickAddProduct: (scannedBarcode: string) => void;
   onOpenAddProduct?: () => void;
   onEditProduct?: (product: Product) => void;
@@ -54,6 +57,9 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   products,
   cart = [],
   onAddToCart,
+  onUpdateQuantity,
+  onRemoveItem,
+  onProceedToCheckout,
   onOpenQuickAddProduct,
   onOpenAddProduct,
   onEditProduct,
@@ -62,6 +68,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
   settings,
   onStockAlert,
 }) => {
+  const [activeMode, setActiveMode] = useState<'manual' | 'scanner'>('manual');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
@@ -387,629 +394,887 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({
         className="hidden"
       />
 
-      {/* Search & Scanner Header Bar */}
-      <form onSubmit={handleManualFormSubmit} className="space-y-2">
-        <div className="relative bg-[#0a101d] border border-[#1b2b48] rounded-xl px-4 pt-2.5 pb-2 focus-within:border-blue-500 transition-colors">
-          <div className="flex items-center justify-between">
-            <label className="block text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono flex items-center gap-1.5">
-              <QrCode className="w-3 h-3 text-blue-400" />
-              <span>SEARCH / QR CODE SCANNER</span>
-            </label>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setShowQuickTestBarcodes(!showQuickTestBarcodes)}
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 transition-colors cursor-pointer ${
-                  showQuickTestBarcodes
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                    : 'text-slate-400 hover:text-amber-300 hover:bg-[#15233f]'
-                }`}
-                title="Quick QR Simulation Tests"
-              >
-                <Zap className="w-3 h-3" />
-                <span>Test QRs</span>
-              </button>
-            </div>
-          </div>
+      {/* 2 Tab Options - Layered Papercut Segmented Control */}
+      <div className="grid grid-cols-2 gap-2 bg-[#060c18] p-1.5 rounded-2xl border border-[#182a4a] paper-recessed">
+        <button
+          type="button"
+          onClick={() => setActiveMode('manual')}
+          className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            activeMode === 'manual'
+              ? 'bg-blue-600 text-white paper-btn-primary'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-[#121f3a]'
+          }`}
+        >
+          <LayoutGrid className="w-4 h-4" />
+          <span>Manually Select product</span>
+        </button>
 
-          <div className="flex items-center gap-2 mt-0.5">
-            <input
-              ref={searchInputRef}
-              type="text"
-              id="barcode-search-input"
-              placeholder="Scan QR code, SKU or search item..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-transparent text-slate-100 text-sm placeholder:text-slate-500 focus:outline-none font-medium font-mono"
-            />
-
-            {/* Upload image button */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-[#15233f] transition-colors shrink-0 cursor-pointer"
-              title="Upload QR Code image to scan"
-            >
-              <Upload className="w-4 h-4" />
-            </button>
-
-            {/* Camera scanner toggle button */}
-            <button
-              type="button"
-              onClick={() => {
-                if (isCameraActive) {
-                  setIsCameraActive(false);
-                } else {
-                  setIsCameraActive(true);
-                  setRetryNonce((prev) => prev + 1);
-                }
-              }}
-              className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors shrink-0 cursor-pointer ${
-                isCameraActive
-                  ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse'
-                  : 'bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600/30'
-              }`}
-              title={isCameraActive ? 'Turn off camera scanner' : 'Turn on camera QR scanner'}
-            >
-              {isCameraActive ? <CameraOff className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
-            </button>
-          </div>
-        </div>
-      </form>
-
-      {/* Live Camera Scanner Viewport */}
-      {isCameraActive && (
-        <div className="p-3 bg-[#0a101d] border border-blue-500/40 rounded-2xl shadow-xl space-y-2 relative overflow-hidden">
-          <div className="flex items-center justify-between text-xs text-slate-300 px-1">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-              <span className="font-bold text-emerald-400">Live Camera QR Code Scanner</span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {availableCameras.length > 1 && (
-                <div className="flex items-center gap-1 bg-[#121f3a] px-2 py-0.5 rounded-lg border border-[#1b2b48]">
-                  <Video className="w-3 h-3 text-blue-400" />
-                  <select
-                    value={selectedCameraId}
-                    onChange={(e) => {
-                      setSelectedCameraId(e.target.value);
-                      setRetryNonce((prev) => prev + 1);
-                    }}
-                    className="bg-transparent text-[11px] text-slate-200 font-mono focus:outline-none"
-                  >
-                    {availableCameras.map((cam, index) => (
-                      <option key={cam.id} value={cam.id} className="bg-[#0a101d] text-slate-200">
-                        {cam.label || `Camera ${index + 1}`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => setRetryNonce((prev) => prev + 1)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-[#15233f] transition-colors"
-                title="Restart camera stream"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-
-          {/* Camera Viewfinder Box */}
-          <div className="relative w-full aspect-4/3 max-h-56 bg-black rounded-xl overflow-hidden border border-[#1b2b48] flex items-center justify-center">
-            <div id="camera-reader" className="w-full h-full object-cover" />
-
-            {/* Target Reticle Overlay */}
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              <div className="w-36 h-36 border-2 border-blue-400/80 rounded-2xl relative shadow-lg">
-                <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-emerald-400 -mt-1 -ml-1" />
-                <div className="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-emerald-400 -mt-1 -mr-1" />
-                <div className="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-emerald-400 -mb-1 -ml-1" />
-                <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-emerald-400 -mb-1 -mr-1" />
-                {/* Center scan beam */}
-                <div className="absolute inset-x-2 h-0.5 bg-linear-to-r from-transparent via-emerald-400 to-transparent animate-pulse top-1/2 -translate-y-1/2" />
-              </div>
-            </div>
-
-            {isInitializingCamera && (
-              <div className="absolute inset-0 bg-black/75 flex flex-col items-center justify-center gap-2 text-xs text-blue-400 font-mono">
-                <RefreshCw className="w-6 h-6 animate-spin" />
-                <span>Starting QR Camera Lens...</span>
-              </div>
-            )}
-          </div>
-
-          {cameraError && (
-            <div className="p-2.5 bg-rose-950/40 border border-rose-500/40 rounded-xl text-rose-300 text-xs flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <p>{cameraError}</p>
-                <div className="flex gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setRetryNonce((prev) => prev + 1)}
-                    className="px-2.5 py-1 bg-rose-800/60 hover:bg-rose-700/80 rounded-lg text-[11px] font-bold text-white transition-colors"
-                  >
-                    Retry Camera
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="px-2.5 py-1 bg-[#142342] hover:bg-[#1e3463] rounded-lg text-[11px] font-bold text-slate-200 transition-colors"
-                  >
-                    Upload QR Image
-                  </button>
-                </div>
-              </div>
-            </div>
+        <button
+          type="button"
+          onClick={() => setActiveMode('scanner')}
+          className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer relative ${
+            activeMode === 'scanner'
+              ? 'bg-blue-600 text-white paper-btn-primary'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-[#121f3a]'
+          }`}
+        >
+          <QrCode className="w-4 h-4" />
+          <span>Scan by QR Code</span>
+          {cart.length > 0 && activeMode !== 'scanner' && (
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-xs ring-2 ring-[#060c18]"></span>
           )}
-        </div>
-      )}
+        </button>
+      </div>
 
-      {/* Quick Test QR Badges (Expandable Panel) */}
-      {showQuickTestBarcodes && (
-        <div className="p-3 bg-[#0a101d] border border-amber-500/30 rounded-2xl shadow-lg space-y-2">
-          <div className="flex items-center justify-between text-xs text-amber-300">
-            <span className="font-bold flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5" /> 1-Click Simulation QRs
-            </span>
-            <span className="text-[10px] text-slate-400">Click any card to simulate scan</span>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {products.slice(0, 6).map((item) => (
+      {/* TAB 1: MANUALLY SELECT PRODUCT -> QUICK CATALOG */}
+      {activeMode === 'manual' && (
+        <div className="space-y-3 animate-in fade-in duration-200">
+          {/* Category Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+            {categories.map((cat) => (
               <button
-                key={item.id}
+                key={cat}
                 type="button"
-                onClick={() => handleProcessBarcode(item.barcode)}
-                className="p-2 bg-[#0d1629] hover:bg-[#142240] border border-[#1b2b48] hover:border-amber-500/50 rounded-xl text-left transition-all group flex flex-col justify-between cursor-pointer"
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer paper-card ${
+                  selectedCategory === cat
+                    ? 'bg-blue-600 text-white border border-blue-400/50 shadow-blue-900/40'
+                    : 'bg-[#091224] border border-[#1b2f52] text-slate-400 hover:text-slate-200'
+                }`}
               >
-                <div className="text-[11px] font-bold text-slate-200 truncate group-hover:text-amber-300">
-                  {item.name}
-                </div>
-                <div className="flex items-center justify-between mt-1 text-[10px] font-mono text-slate-400">
-                  <span className="text-amber-400 font-bold">{formatCurrency(item.unitPrice, currencySymbol)}</span>
-                  <ProductQrBadge code={item.barcode} size={14} />
-                </div>
+                {cat}
               </button>
             ))}
           </div>
-        </div>
-      )}
 
-      {/* Last Scanned Feedback Pill */}
-      {lastScannedInfo && Date.now() - lastScannedInfo.time < 4000 && (
-        <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/40 rounded-xl text-emerald-300 text-xs flex items-center justify-between animate-fadeIn">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            <span>
-              Scanned: <strong>{lastScannedInfo.name}</strong> ({lastScannedInfo.barcode})
-            </span>
-          </div>
-          <span className="text-[10px] font-mono text-emerald-400/80">Added to cart</span>
-        </div>
-      )}
-
-      {/* Category Pills */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
-        {categories.map((cat) => (
-          <button
-            key={cat}
-            type="button"
-            onClick={() => setSelectedCategory(cat)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer ${
-              selectedCategory === cat
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40'
-                : 'bg-[#0a101d] border border-[#1b2b48] text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            {cat}
-          </button>
-        ))}
-      </div>
-
-      {/* Items Section Header */}
-      <div className="flex items-center justify-between pt-1">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono">
-            QUICK CATALOG
-          </span>
-          <span className="px-2 py-0.5 rounded-full bg-[#152442] text-blue-400 text-[10px] font-bold font-mono">
-            {filteredProducts.length} ITEMS
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* View mode toggle: List vs Grid */}
-          <div className="flex items-center bg-[#090f1d] border border-[#1b2b48] rounded-xl p-0.5">
-            <button
-              type="button"
-              onClick={() => setViewMode('list')}
-              title="List View"
-              className={`p-1 rounded-lg transition-colors cursor-pointer ${
-                viewMode === 'list'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <List className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('grid')}
-              title="Grid View"
-              className={`p-1 rounded-lg transition-colors cursor-pointer ${
-                viewMode === 'grid'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {onOpenAddProduct && (
-            <button
-              type="button"
-              onClick={onOpenAddProduct}
-              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-md shadow-blue-900/30 transition-colors cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Product</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Product Display Section */}
-      <div className="max-h-[420px] overflow-y-auto pr-1">
-        {filteredProducts.length > 0 ? (
-          viewMode === 'grid' ? (
-            /* Grid View: Image, Name, Price, and Click to Add Button */
-            <div className="grid grid-cols-2 gap-2.5">
-              {filteredProducts.map((product, idx) => {
-                const avatarColor = AVATAR_COLORS[idx % AVATAR_COLORS.length];
-                const initial = product.name.charAt(0).toUpperCase();
-                const inCart = getInCartQty(product.id);
-                const maxStock = typeof product.stock === 'number' ? product.stock : 999;
-                const isOutOfStock = maxStock <= 0;
-                const isCartFull = inCart >= maxStock;
-
-                const handleDirectAdd = (e: React.MouseEvent) => {
-                  e.stopPropagation();
-                  if (isOutOfStock) {
-                    posAudio.playStockAlertSound();
-                    onStockAlert?.(`Out of Stock: "${product.name}" has 0 units in stock.`);
-                    return;
-                  }
-                  if (isCartFull) {
-                    posAudio.playStockAlertSound();
-                    onStockAlert?.(
-                      `Stock limit reached: All ${maxStock} units of "${product.name}" are already in your cart!`
-                    );
-                    return;
-                  }
-                  posAudio.playScanBeep();
-                  onAddToCart(product, 1);
-                };
-
-                return (
-                  <div
-                    key={product.id}
-                    className={`border rounded-2xl p-2.5 flex flex-col justify-between transition-all shadow-xs group relative ${
-                      isOutOfStock
-                        ? 'bg-[#0a0f1d]/70 border-rose-950/40 opacity-70'
-                        : isCartFull
-                        ? 'bg-[#0d162a] border-amber-500/30'
-                        : 'bg-[#0b1325] hover:bg-[#101b33] border-[#1a2b47] hover:border-blue-500/50'
-                    }`}
-                  >
-                    {/* Top Action Icons (Edit & Qty) */}
-                    <div className="absolute top-3.5 right-3.5 z-10 flex items-center gap-1">
-                      {onEditProduct && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onEditProduct(product);
-                          }}
-                          title="Edit Product"
-                          className="p-1 rounded-lg bg-black/60 backdrop-blur-xs text-slate-300 hover:text-blue-400 hover:bg-black/80 transition-colors cursor-pointer"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Product Image */}
-                    <div className="relative w-full aspect-4/3 rounded-xl overflow-hidden bg-[#14203a] border border-[#1e2f4f] mb-2 flex items-center justify-center">
-                      {product.image ? (
-                        <img
-                          src={product.image}
-                          alt={product.name}
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                        />
-                      ) : (
-                        <div className={`w-full h-full ${avatarColor} flex items-center justify-center font-bold text-2xl font-mono`}>
-                          {initial}
-                        </div>
-                      )}
-
-                      {/* Stock / In-cart Badge overlay on image */}
-                      {isOutOfStock ? (
-                        <span className="absolute bottom-1.5 left-1.5 text-[9px] font-mono px-1.5 py-0.5 rounded font-bold bg-rose-950/90 text-rose-300 border border-rose-700/80 backdrop-blur-xs">
-                          OUT OF STOCK
-                        </span>
-                      ) : inCart > 0 ? (
-                        <span className="absolute bottom-1.5 left-1.5 text-[9px] font-mono px-1.5 py-0.5 rounded font-bold bg-blue-900/90 text-blue-200 border border-blue-500/80 backdrop-blur-xs">
-                          In Cart: {inCart}
-                        </span>
-                      ) : (
-                        <span className="absolute bottom-1.5 left-1.5 text-[9px] font-mono px-1.5 py-0.5 rounded font-bold bg-slate-900/80 text-slate-300 border border-slate-700 backdrop-blur-xs">
-                          Stock: {maxStock}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Product Name & Category */}
-                    <div className="space-y-1 mb-2">
-                      <h4 className="font-bold text-xs text-slate-100 line-clamp-2 min-h-[32px] group-hover:text-blue-400 transition-colors leading-snug">
-                        {product.name}
-                      </h4>
-                      <div className="text-[10px] text-slate-400 font-mono truncate">
-                        {product.category}
-                      </div>
-                    </div>
-
-                    {/* Product Price & Add Button */}
-                    <div className="pt-1.5 border-t border-[#182642] space-y-2">
-                      <div className="flex items-baseline justify-between">
-                        <span className="font-extrabold text-sm text-blue-400 font-mono">
-                          {formatCurrency(product.unitPrice, currencySymbol)}
-                        </span>
-                        {product.mrp && product.mrp > product.unitPrice && (
-                          <span className="text-[10px] font-mono text-slate-500 line-through">
-                            {formatCurrency(product.mrp, currencySymbol)}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Click to Add Button */}
-                      <button
-                        type="button"
-                        onClick={handleDirectAdd}
-                        disabled={isOutOfStock}
-                        className={`w-full py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer ${
-                          isOutOfStock
-                            ? 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
-                            : isCartFull
-                            ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/30 active:scale-95'
-                            : inCart > 0
-                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30 active:scale-95'
-                            : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/40 active:scale-95'
-                        }`}
-                        title="Click to Add Product to Cart"
-                      >
-                        <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                        <span>
-                          {isOutOfStock
-                            ? 'Out of Stock'
-                            : inCart > 0
-                            ? `+ Add (${inCart})`
-                            : 'Click to Add'}
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+          {/* Quick Catalog Header: Only + icon button (No Add Text) */}
+          <div className="flex items-center justify-between pt-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono">
+                QUICK CATALOG
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-[#13223f] text-blue-300 border border-blue-500/20 text-[10px] font-bold font-mono shadow-xs">
+                {filteredProducts.length} ITEMS
+              </span>
             </div>
-          ) : (
-            /* List View: Image, Name, Price, and Click to Add Button */
-            <div className="space-y-2.5">
-              {filteredProducts.map((product, idx) => {
-                const avatarColor = AVATAR_COLORS[idx % AVATAR_COLORS.length];
-                const initial = product.name.charAt(0).toUpperCase();
-                const inCart = getInCartQty(product.id);
-                const maxStock = typeof product.stock === 'number' ? product.stock : 999;
-                const isOutOfStock = maxStock <= 0;
-                const isCartFull = inCart >= maxStock;
 
-                const handleDirectAdd = (e?: React.MouseEvent) => {
-                  if (e) e.stopPropagation();
-                  if (isOutOfStock) {
-                    posAudio.playStockAlertSound();
-                    onStockAlert?.(`Out of Stock: "${product.name}" has 0 units in stock.`);
-                    return;
-                  }
-                  if (isCartFull) {
-                    posAudio.playStockAlertSound();
-                    onStockAlert?.(
-                      `Stock limit reached: All ${maxStock} units of "${product.name}" are already in your cart!`
-                    );
-                    return;
-                  }
-                  posAudio.playScanBeep();
-                  onAddToCart(product, 1);
-                };
+            <div className="flex items-center gap-2">
+              {/* View mode toggle: List vs Grid */}
+              <div className="flex items-center bg-[#060c18] border border-[#182a4a] rounded-xl p-0.5 paper-recessed">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  title="List View"
+                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                    viewMode === 'list'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <List className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('grid')}
+                  title="Grid View"
+                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                    viewMode === 'grid'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                </button>
+              </div>
 
-                return (
-                  <div
-                    key={product.id}
-                    onClick={() => handleDirectAdd()}
-                    className={`border rounded-2xl p-3 flex items-center justify-between cursor-pointer transition-all shadow-xs group ${
-                      isOutOfStock
-                        ? 'bg-[#0a0f1d]/60 border-rose-950/40 opacity-70 hover:border-rose-700/50'
-                        : isCartFull
-                        ? 'bg-[#0d162a] border-amber-500/30 hover:border-amber-400/50'
-                        : 'bg-[#0b1325] hover:bg-[#101b33] border-[#1a2b47] hover:border-blue-500/50'
-                    }`}
-                  >
-                    {/* Left: Product Image & Info */}
-                    <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
-                      {/* Product Image */}
-                      <div className="relative shrink-0">
-                        {product.image ? (
-                          <img
-                            src={product.image}
-                            alt={product.name}
-                            referrerPolicy="no-referrer"
-                            className="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl object-cover border border-[#1e2f4f] bg-[#15233f] shadow-xs group-hover:scale-105 transition-transform"
-                          />
-                        ) : (
-                          <div className={`w-13 h-13 sm:w-14 sm:h-14 rounded-2xl ${avatarColor} flex items-center justify-center font-bold text-base shrink-0 font-mono shadow-xs`}>
-                            {initial}
-                          </div>
-                        )}
-                        {inCart > 0 && (
-                          <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-blue-600 text-white font-mono text-[9px] font-bold flex items-center justify-center border border-slate-900 shadow-xs">
-                            {inCart}
-                          </span>
-                        )}
-                      </div>
+              {/* Only + button */}
+              {onOpenAddProduct && (
+                <button
+                  type="button"
+                  onClick={onOpenAddProduct}
+                  title="Add New Product"
+                  className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center justify-center transition-all cursor-pointer paper-btn-primary"
+                >
+                  <Plus className="w-4 h-4 stroke-[2.5]" />
+                </button>
+              )}
+            </div>
+          </div>
 
-                      {/* Product Name, Category & Stock Status */}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <h4 className="font-bold text-xs sm:text-sm text-slate-100 truncate group-hover:text-blue-400 transition-colors">
-                            {product.name}
-                          </h4>
+          {/* Product Display Section */}
+          <div className="max-h-[420px] overflow-y-auto pr-1">
+            {filteredProducts.length > 0 ? (
+              viewMode === 'grid' ? (
+                /* Grid View */
+                <div className="grid grid-cols-2 gap-2.5">
+                  {filteredProducts.map((product, idx) => {
+                    const avatarColor = AVATAR_COLORS[idx % AVATAR_COLORS.length];
+                    const initial = product.name.charAt(0).toUpperCase();
+                    const inCart = getInCartQty(product.id);
+                    const maxStock = typeof product.stock === 'number' ? product.stock : 999;
+                    const isOutOfStock = maxStock <= 0;
+                    const isCartFull = inCart >= maxStock;
+
+                    const handleDirectAdd = (e: React.MouseEvent) => {
+                      e.stopPropagation();
+                      if (isOutOfStock) {
+                        posAudio.playStockAlertSound();
+                        onStockAlert?.(`Out of Stock: "${product.name}" has 0 units in stock.`);
+                        return;
+                      }
+                      if (isCartFull) {
+                        posAudio.playStockAlertSound();
+                        onStockAlert?.(
+                          `Stock limit reached: All ${maxStock} units of "${product.name}" are already in your cart!`
+                        );
+                        return;
+                      }
+                      posAudio.playScanBeep();
+                      onAddToCart(product, 1);
+                    };
+
+                    return (
+                      <div
+                        key={product.id}
+                        className={`border rounded-2xl p-2.5 flex flex-col justify-between transition-all shadow-xs group relative ${
+                          isOutOfStock
+                            ? 'bg-[#0a0f1d]/70 border-rose-950/40 opacity-70'
+                            : isCartFull
+                            ? 'bg-[#0d162a] border-amber-500/30'
+                            : 'bg-[#0b1325] hover:bg-[#101b33] border-[#1a2b47] hover:border-blue-500/50'
+                        }`}
+                      >
+                        <div className="absolute top-3.5 right-3.5 z-10 flex items-center gap-1">
+                          {onEditProduct && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onEditProduct(product);
+                              }}
+                              title="Edit Product"
+                              className="p-1 rounded-lg bg-black/60 backdrop-blur-xs text-slate-300 hover:text-blue-400 hover:bg-black/80 transition-colors cursor-pointer"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="relative w-full aspect-4/3 rounded-xl overflow-hidden bg-[#14203a] border border-[#1e2f4f] mb-2 flex items-center justify-center">
+                          {product.image ? (
+                            <img
+                              src={product.image}
+                              alt={product.name}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                            />
+                          ) : (
+                            <div className={`w-full h-full ${avatarColor} flex items-center justify-center font-bold text-2xl font-mono`}>
+                              {initial}
+                            </div>
+                          )}
+
                           {isOutOfStock ? (
-                            <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-bold bg-rose-950 text-rose-400 border border-rose-800">
+                            <span className="absolute bottom-1.5 left-1.5 text-[9px] font-mono px-1.5 py-0.5 rounded font-bold bg-rose-950/90 text-rose-300 border border-rose-700/80 backdrop-blur-xs">
                               OUT OF STOCK
                             </span>
-                          ) : isCartFull ? (
-                            <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-bold bg-amber-950 text-amber-400 border border-amber-800">
-                              MAX REACHED
+                          ) : inCart > 0 ? (
+                            <span className="absolute bottom-1.5 left-1.5 text-[9px] font-mono px-1.5 py-0.5 rounded font-bold bg-blue-900/90 text-blue-200 border border-blue-500/80 backdrop-blur-xs">
+                              In Cart: {inCart}
                             </span>
                           ) : (
-                            <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                            <span className="absolute bottom-1.5 left-1.5 text-[9px] font-mono px-1.5 py-0.5 rounded font-bold bg-slate-900/80 text-slate-300 border border-slate-700 backdrop-blur-xs">
                               Stock: {maxStock}
                             </span>
                           )}
                         </div>
 
-                        <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono mt-1 flex-wrap">
-                          <span>{product.category}</span>
-                          <span>•</span>
+                        <div className="space-y-1 mb-2">
+                          <h4 className="font-bold text-xs text-slate-100 line-clamp-2 min-h-[32px] group-hover:text-blue-400 transition-colors leading-snug">
+                            {product.name}
+                          </h4>
+                          <div className="text-[10px] text-slate-400 font-mono truncate">
+                            {product.category}
+                          </div>
+                        </div>
+
+                        <div className="pt-1.5 border-t border-[#182642] space-y-2">
+                          <div className="flex items-baseline justify-between">
+                            <span className="font-extrabold text-sm text-blue-400 font-mono">
+                              {formatCurrency(product.unitPrice, currencySymbol)}
+                            </span>
+                            {product.mrp && product.mrp > product.unitPrice && (
+                              <span className="text-[10px] font-mono text-slate-500 line-through">
+                                {formatCurrency(product.mrp, currencySymbol)}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Stepper with - count + if in cart, or single + button */}
+                          {inCart > 0 ? (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex items-center justify-between bg-[#060c18] border border-blue-500/40 rounded-xl p-1 shadow-inner"
+                            >
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  posAudio.playScanBeep();
+                                  if (inCart <= 1) {
+                                    if (onRemoveItem) onRemoveItem(product.id);
+                                    else if (onUpdateQuantity) onUpdateQuantity(product.id, 0);
+                                  } else {
+                                    if (onUpdateQuantity) onUpdateQuantity(product.id, inCart - 1);
+                                    else if (onAddToCart) onAddToCart(product, -1);
+                                  }
+                                }}
+                                className="w-8 h-8 flex items-center justify-center rounded-lg bg-[#121e36] text-slate-300 hover:text-rose-400 active:bg-rose-950/40 transition-colors cursor-pointer"
+                                title="Reduce quantity or remove"
+                                aria-label="Reduce quantity"
+                              >
+                                <Minus className="w-4 h-4 stroke-[2.5]" />
+                              </button>
+
+                              <span className="font-mono font-black text-sm text-emerald-400 px-2 min-w-[24px] text-center">
+                                {inCart}
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (isCartFull) {
+                                    posAudio.playStockAlertSound();
+                                    onStockAlert?.(
+                                      `Stock limit reached: All ${maxStock} units of "${product.name}" are already in your cart!`
+                                    );
+                                    return;
+                                  }
+                                  posAudio.playScanBeep();
+                                  if (onUpdateQuantity) {
+                                    onUpdateQuantity(product.id, inCart + 1);
+                                  } else {
+                                    onAddToCart(product, 1);
+                                  }
+                                }}
+                                disabled={isCartFull}
+                                className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+                                  isCartFull
+                                    ? 'bg-[#101726] text-slate-600 cursor-not-allowed'
+                                    : 'bg-blue-600 text-white hover:bg-blue-500 active:bg-blue-700 shadow-xs active:scale-95'
+                                }`}
+                                title="Increase quantity by 1"
+                                aria-label="Increase quantity"
+                              >
+                                <Plus className="w-4 h-4 stroke-[2.5]" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={handleDirectAdd}
+                              disabled={isOutOfStock}
+                              className={`w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer ${
+                                isOutOfStock
+                                  ? 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
+                                  : 'bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white shadow-blue-900/40 active:scale-95'
+                              }`}
+                              title={isOutOfStock ? 'Out of Stock' : 'Add to Bill'}
+                            >
+                              <Plus className="w-4 h-4 stroke-[2.5]" />
+                              <span>{isOutOfStock ? 'Out of Stock' : 'Add'}</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                /* List View */
+                <div className="space-y-2.5">
+                  {filteredProducts.map((product, idx) => {
+                    const avatarColor = AVATAR_COLORS[idx % AVATAR_COLORS.length];
+                    const initial = product.name.charAt(0).toUpperCase();
+                    const inCart = getInCartQty(product.id);
+                    const maxStock = typeof product.stock === 'number' ? product.stock : 999;
+                    const isOutOfStock = maxStock <= 0;
+                    const isCartFull = inCart >= maxStock;
+
+                    const handleDirectAdd = (e?: React.MouseEvent) => {
+                      if (e) e.stopPropagation();
+                      if (isOutOfStock) {
+                        posAudio.playStockAlertSound();
+                        onStockAlert?.(`Out of Stock: "${product.name}" has 0 units in stock.`);
+                        return;
+                      }
+                      if (isCartFull) {
+                        posAudio.playStockAlertSound();
+                        onStockAlert?.(
+                          `Stock limit reached: All ${maxStock} units of "${product.name}" are already in your cart!`
+                        );
+                        return;
+                      }
+                      posAudio.playScanBeep();
+                      onAddToCart(product, 1);
+                    };
+
+                    return (
+                      <div
+                        key={product.id}
+                        onClick={(e) => {
+                          // Only trigger row-click add if not already in cart
+                          if (inCart === 0) {
+                            handleDirectAdd(e);
+                          }
+                        }}
+                        className={`border rounded-2xl p-3 flex items-center justify-between transition-all shadow-xs group ${
+                          isOutOfStock
+                            ? 'bg-[#0a0f1d]/60 border-rose-950/40 opacity-70'
+                            : inCart > 0
+                            ? 'bg-[#0d172e] border-blue-500/40 shadow-blue-950/20'
+                            : 'bg-[#0b1325] hover:bg-[#101b33] border-[#1a2b47] hover:border-blue-500/50 cursor-pointer'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
+                          <div className="relative shrink-0">
+                            {product.image ? (
+                              <img
+                                src={product.image}
+                                alt={product.name}
+                                referrerPolicy="no-referrer"
+                                className="w-13 h-13 sm:w-14 sm:h-14 rounded-2xl object-cover border border-[#1e2f4f] bg-[#15233f] shadow-xs group-hover:scale-105 transition-transform"
+                              />
+                            ) : (
+                              <div className={`w-13 h-13 sm:w-14 sm:h-14 rounded-2xl ${avatarColor} flex items-center justify-center font-bold text-base shrink-0 font-mono shadow-xs`}>
+                                {initial}
+                              </div>
+                            )}
+                            {inCart > 0 && (
+                              <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-blue-600 text-white font-mono text-[9px] font-bold flex items-center justify-center border border-slate-900 shadow-xs">
+                                {inCart}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h4 className="font-bold text-xs sm:text-sm text-slate-100 truncate group-hover:text-blue-400 transition-colors">
+                                {product.name}
+                              </h4>
+                              {isOutOfStock ? (
+                                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-bold bg-rose-950 text-rose-400 border border-rose-800">
+                                  OUT OF STOCK
+                                </span>
+                              ) : isCartFull ? (
+                                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-bold bg-amber-950 text-amber-400 border border-amber-800">
+                                  MAX REACHED
+                                </span>
+                              ) : (
+                                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                                  Stock: {maxStock}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono mt-1 flex-wrap">
+                              <span>{product.category}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Price & Stepper / Only + button */}
+                        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 pl-1">
+                          <div className="text-right">
+                            <div className="font-extrabold text-xs sm:text-sm text-slate-100 font-mono group-hover:text-blue-400 transition-colors">
+                              {formatCurrency(product.unitPrice, currencySymbol)}
+                            </div>
+                            {product.mrp && product.mrp > product.unitPrice && (
+                              <div className="text-[10px] font-mono text-slate-500 line-through">
+                                {formatCurrency(product.mrp, currencySymbol)}
+                              </div>
+                            )}
+                          </div>
+
+                          {onEditProduct && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onEditProduct(product);
+                              }}
+                              title="Edit Product"
+                              className="p-1.5 rounded-xl text-slate-400 hover:text-blue-400 hover:bg-[#152445] transition-colors cursor-pointer"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
+                          {inCart > 0 ? (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex items-center bg-[#060c18] border border-blue-500/50 rounded-xl p-1 shadow-inner"
+                            >
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  posAudio.playScanBeep();
+                                  if (inCart <= 1) {
+                                    if (onRemoveItem) onRemoveItem(product.id);
+                                    else if (onUpdateQuantity) onUpdateQuantity(product.id, 0);
+                                  } else {
+                                    if (onUpdateQuantity) onUpdateQuantity(product.id, inCart - 1);
+                                    else if (onAddToCart) onAddToCart(product, -1);
+                                  }
+                                }}
+                                className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg bg-[#14203a] text-slate-300 hover:text-rose-400 active:bg-rose-950/40 transition-colors cursor-pointer"
+                                title="Reduce quantity or remove"
+                                aria-label="Reduce quantity"
+                              >
+                                <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
+                              </button>
+
+                              <span className="font-mono text-xs font-black text-emerald-400 px-2 min-w-[22px] text-center">
+                                {inCart}
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (isCartFull) {
+                                    posAudio.playStockAlertSound();
+                                    onStockAlert?.(
+                                      `Stock limit reached: All ${maxStock} units of "${product.name}" are already in your cart!`
+                                    );
+                                    return;
+                                  }
+                                  posAudio.playScanBeep();
+                                  if (onUpdateQuantity) {
+                                    onUpdateQuantity(product.id, inCart + 1);
+                                  } else {
+                                    onAddToCart(product, 1);
+                                  }
+                                }}
+                                disabled={isCartFull}
+                                className={`w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+                                  isCartFull
+                                    ? 'bg-[#101726] text-slate-600 cursor-not-allowed'
+                                    : 'bg-blue-600 text-white hover:bg-blue-500 active:bg-blue-700 active:scale-95'
+                                }`}
+                                title="Increase quantity by 1"
+                                aria-label="Increase quantity"
+                              >
+                                <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => handleDirectAdd(e)}
+                              disabled={isOutOfStock}
+                              title={isOutOfStock ? 'Sold Out' : 'Add to Bill'}
+                              className={`p-2.5 sm:px-3 sm:py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all shadow-md cursor-pointer ${
+                                isOutOfStock
+                                  ? 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed opacity-60'
+                                  : 'bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white shadow-blue-900/40 active:scale-95'
+                              }`}
+                            >
+                              <Plus className="w-4 h-4 stroke-[2.5]" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )
+            ) : (
+              <div className="py-8 text-center text-slate-500 text-xs space-y-2">
+                <p>No products found matching &quot;{searchQuery}&quot;</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: SCAN BY QR CODE */}
+      {activeMode === 'scanner' && (
+        <div className="space-y-3.5 animate-in fade-in duration-200">
+          {/* SEARCH / QR CODE SCANNER */}
+          <form onSubmit={handleManualFormSubmit} className="space-y-2">
+            <div className="relative bg-[#060c18] border border-[#182a4a] rounded-2xl px-4 pt-2.5 pb-2 focus-within:border-blue-500 transition-all paper-recessed">
+              <div className="flex items-center justify-between">
+                <label className="block text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono flex items-center gap-1.5">
+                  <QrCode className="w-3 h-3 text-blue-400" />
+                  <span>SEARCH / QR CODE SCANNER</span>
+                </label>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickTestBarcodes(!showQuickTestBarcodes)}
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer paper-card active:scale-95 ${
+                      showQuickTestBarcodes
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-xs'
+                        : 'text-slate-400 hover:text-amber-300 hover:bg-[#15233f]'
+                    }`}
+                    title="Quick QR Simulation Tests"
+                  >
+                    <Zap className="w-3 h-3" />
+                    <span>Test QRs</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 mt-0.5">
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  id="barcode-search-input"
+                  placeholder="Scan QR code, SKU or search item..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-transparent text-slate-100 text-sm placeholder:text-slate-500 focus:outline-none font-medium font-mono"
+                />
+
+                {/* Upload image button */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-blue-400 hover:bg-[#15233f] transition-all shrink-0 cursor-pointer paper-card active:scale-95"
+                  title="Upload QR Code image to scan"
+                >
+                  <Upload className="w-4 h-4" />
+                </button>
+
+                {/* Camera scanner toggle button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isCameraActive) {
+                      setIsCameraActive(false);
+                    } else {
+                      setIsCameraActive(true);
+                      setRetryNonce((prev) => prev + 1);
+                    }
+                  }}
+                  className={`p-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 transition-all shrink-0 cursor-pointer paper-card active:scale-95 ${
+                    isCameraActive
+                      ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse shadow-rose-950/40'
+                      : 'bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600/30 shadow-blue-950/40'
+                  }`}
+                  title={isCameraActive ? 'Turn off camera scanner' : 'Turn on camera QR scanner'}
+                >
+                  {isCameraActive ? <CameraOff className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          </form>
+
+          {/* Live Camera Scanner Viewport */}
+          {isCameraActive && (
+            <div className="p-3 bg-[#081020] border border-blue-500/40 rounded-2xl space-y-2 relative overflow-hidden paper-sheet-2">
+              <div className="flex items-center justify-between text-xs text-slate-300 px-1">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  <span className="font-bold text-emerald-400">Live Camera QR Code Scanner</span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {availableCameras.length > 1 && (
+                    <div className="flex items-center gap-1 bg-[#121f3a] px-2 py-0.5 rounded-lg border border-[#1b2b48]">
+                      <Video className="w-3 h-3 text-blue-400" />
+                      <select
+                        value={selectedCameraId}
+                        onChange={(e) => {
+                          setSelectedCameraId(e.target.value);
+                          setRetryNonce((prev) => prev + 1);
+                        }}
+                        className="bg-transparent text-[11px] text-slate-200 font-mono focus:outline-none"
+                      >
+                        {availableCameras.map((cam, index) => (
+                          <option key={cam.id} value={cam.id} className="bg-[#0a101d] text-slate-200">
+                            {cam.label || `Camera ${index + 1}`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setRetryNonce((prev) => prev + 1)}
+                    className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-[#15233f] transition-colors"
+                    title="Restart camera stream"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Camera Viewfinder Box */}
+              <div className="relative w-full aspect-4/3 max-h-56 bg-black rounded-xl overflow-hidden border border-[#1b2b48] flex items-center justify-center">
+                <div id="camera-reader" className="w-full h-full object-cover" />
+
+                {/* Target Reticle Overlay */}
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                  <div className="w-36 h-36 border-2 border-blue-400/80 rounded-2xl relative shadow-lg">
+                    <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-emerald-400 -mt-1 -ml-1" />
+                    <div className="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-emerald-400 -mt-1 -mr-1" />
+                    <div className="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-emerald-400 -mb-1 -ml-1" />
+                    <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-emerald-400 -mb-1 -mr-1" />
+                    <div className="absolute inset-x-2 h-0.5 bg-linear-to-r from-transparent via-emerald-400 to-transparent animate-pulse top-1/2 -translate-y-1/2" />
+                  </div>
+                </div>
+
+                {isInitializingCamera && (
+                  <div className="absolute inset-0 bg-black/75 flex flex-col items-center justify-center gap-2 text-xs text-blue-400 font-mono">
+                    <RefreshCw className="w-6 h-6 animate-spin" />
+                    <span>Starting QR Camera Lens...</span>
+                  </div>
+                )}
+              </div>
+
+              {cameraError && (
+                <div className="p-2.5 bg-rose-950/40 border border-rose-500/40 rounded-xl text-rose-300 text-xs flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p>{cameraError}</p>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setRetryNonce((prev) => prev + 1)}
+                        className="px-2.5 py-1 bg-rose-800/60 hover:bg-rose-700/80 rounded-lg text-[11px] font-bold text-white transition-colors"
+                      >
+                        Retry Camera
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="px-2.5 py-1 bg-[#142342] hover:bg-[#1e3463] rounded-lg text-[11px] font-bold text-slate-200 transition-colors"
+                      >
+                        Upload QR Image
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Quick Test QR Badges */}
+          {showQuickTestBarcodes && (
+            <div className="p-3 bg-[#0a101d] border border-amber-500/30 rounded-2xl shadow-lg space-y-2">
+              <div className="flex items-center justify-between text-xs text-amber-300">
+                <span className="font-bold flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5" /> 1-Click Simulation QRs
+                </span>
+                <span className="text-[10px] text-slate-400">Click card to simulate scan</span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {products.slice(0, 6).map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleProcessBarcode(item.barcode)}
+                    className="p-2 bg-[#0d1629] hover:bg-[#142240] border border-[#1b2b48] hover:border-amber-500/50 rounded-xl text-left transition-all group flex flex-col justify-between cursor-pointer"
+                  >
+                    <div className="text-[11px] font-bold text-slate-200 truncate group-hover:text-amber-300">
+                      {item.name}
+                    </div>
+                    <div className="flex items-center justify-between mt-1 text-[10px] font-mono text-slate-400">
+                      <span className="text-amber-400 font-bold">{formatCurrency(item.unitPrice, currencySymbol)}</span>
+                      <ProductQrBadge code={item.barcode} size={14} />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Last Scanned Feedback Pill */}
+          {lastScannedInfo && Date.now() - lastScannedInfo.time < 4000 && (
+            <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/40 rounded-xl text-emerald-300 text-xs flex items-center justify-between animate-fadeIn">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>
+                  Scanned: <strong>{lastScannedInfo.name}</strong> ({lastScannedInfo.barcode})
+                </span>
+              </div>
+              <span className="text-[10px] font-mono text-emerald-400/80">Added to bill</span>
+            </div>
+          )}
+
+          {/* Scanned Products List - Only scanned products added and displayed below in list */}
+          <div className="space-y-2.5 pt-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono flex items-center gap-1.5">
+                <ShoppingCart className="w-3.5 h-3.5 text-blue-400" />
+                <span>SCANNED PRODUCTS ({cart.reduce((a, c) => a + c.quantity, 0)} ITEMS)</span>
+              </span>
+
+              {cart.length > 0 && onProceedToCheckout && (
+                <button
+                  type="button"
+                  onClick={onProceedToCheckout}
+                  className="text-xs font-bold text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer font-mono"
+                >
+                  <span>Proceed to Total</span>
+                  <span>→</span>
+                </button>
+              )}
+            </div>
+
+            {cart.length > 0 ? (
+              <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+                {cart.map((item) => {
+                  const maxStock = typeof item.product.stock === 'number' ? item.product.stock : 999;
+                  const isCartFull = item.quantity >= maxStock;
+
+                  return (
+                    <div
+                      key={item.product.id}
+                      className="bg-[#0b1428] border border-[#1b2e50] hover:border-blue-500/50 rounded-2xl p-3 flex items-center justify-between transition-all paper-card"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
+                        <div className="w-12 h-12 rounded-xl bg-[#14203a] border border-[#1e2f4f] overflow-hidden shrink-0 flex items-center justify-center shadow-xs">
+                          {item.product.image ? (
+                            <img
+                              src={item.product.image}
+                              alt={item.product.name}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <span className="text-sm font-bold text-slate-300 font-mono">
+                              {item.product.name.charAt(0).toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-bold text-xs sm:text-sm text-slate-100 truncate">
+                            {item.product.name}
+                          </h4>
+                          <p className="text-[11px] font-mono text-slate-400 mt-0.5">
+                            <span className="text-emerald-400 font-bold">
+                              {formatCurrency(item.unitPrice, currencySymbol)}
+                            </span>{' '}
+                            × {item.quantity} ={' '}
+                            <span className="text-blue-300 font-bold">
+                              {formatCurrency(item.unitPrice * item.quantity, currencySymbol)}
+                            </span>
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {/* Stepper with - / count / + */}
+                        <div className="flex items-center bg-[#060c18] border border-blue-500/40 rounded-xl p-1 paper-recessed">
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              onViewBarcode?.(product.barcode, product.name, product.unitPrice, product.sku, product.category);
+                              posAudio.playScanBeep();
+                              if (item.quantity <= 1) {
+                                if (onRemoveItem) onRemoveItem(item.product.id);
+                                else if (onUpdateQuantity) onUpdateQuantity(item.product.id, 0);
+                              } else {
+                                if (onUpdateQuantity) onUpdateQuantity(item.product.id, item.quantity - 1);
+                                else if (onAddToCart) onAddToCart(item.product, -1);
+                              }
                             }}
-                            className="text-slate-300 font-mono hover:text-blue-400 hover:underline transition-colors cursor-pointer"
-                            title="Click to view & download large QR Code"
+                            className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg bg-[#14203a] text-slate-300 hover:text-rose-400 active:bg-rose-950/40 transition-colors cursor-pointer"
+                            title="Reduce quantity or remove"
+                            aria-label="Reduce quantity"
                           >
-                            QR: {product.barcode}
+                            <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
                           </button>
-                          <span>•</span>
-                          <ProductQrBadge
-                            code={product.barcode}
-                            size={14}
-                            clickable={true}
+                          
+                          <span className="px-2 font-mono text-xs font-black text-emerald-400 min-w-[22px] text-center">
+                            {item.quantity}
+                          </span>
+
+                          <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              onViewBarcode?.(product.barcode, product.name, product.unitPrice, product.sku, product.category);
+                              if (isCartFull) {
+                                posAudio.playStockAlertSound();
+                                onStockAlert?.(
+                                  `Stock limit reached: All ${maxStock} units of "${item.product.name}" are in cart!`
+                                );
+                                return;
+                              }
+                              posAudio.playScanBeep();
+                              if (onUpdateQuantity) {
+                                onUpdateQuantity(item.product.id, item.quantity + 1);
+                              } else {
+                                onAddToCart(item.product, 1);
+                              }
                             }}
-                          />
+                            disabled={isCartFull}
+                            className={`w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+                              isCartFull
+                                ? 'bg-[#101726] text-slate-600 cursor-not-allowed'
+                                : 'bg-blue-600 text-white hover:bg-blue-500 active:bg-blue-700 active:scale-95'
+                            }`}
+                            title="Increase quantity"
+                            aria-label="Increase quantity"
+                          >
+                            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                          </button>
                         </div>
-                      </div>
-                    </div>
 
-                    {/* Right: Product Price & Dedicated Click to Add Button */}
-                    <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 pl-1">
-                      <div className="text-right">
-                        <div className="font-extrabold text-xs sm:text-sm text-slate-100 font-mono group-hover:text-blue-400 transition-colors">
-                          {formatCurrency(product.unitPrice, currencySymbol)}
-                        </div>
-                        {product.mrp && product.mrp > product.unitPrice && (
-                          <div className="text-[10px] font-mono text-slate-500 line-through">
-                            {formatCurrency(product.mrp, currencySymbol)}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Quantity multi-picker button */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setQuantityModalProduct(product);
-                          const rem = Math.max(1, Math.min(1, maxStock - inCart));
-                          setModalQty(rem > 0 ? rem : 1);
-                          setModalQtyError(null);
-                        }}
-                        title="Select exact quantity"
-                        className="px-2 py-1.5 rounded-xl bg-[#14223d] hover:bg-indigo-600 text-indigo-300 hover:text-white text-[11px] font-bold font-mono transition-colors cursor-pointer border border-[#1d2d4e]"
-                      >
-                        Qty
-                      </button>
-
-                      {onEditProduct && (
+                        {/* Remove button (x) */}
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onEditProduct(product);
+                            posAudio.playScanBeep();
+                            if (onRemoveItem) {
+                              onRemoveItem(item.product.id);
+                            } else if (onUpdateQuantity) {
+                              onUpdateQuantity(item.product.id, 0);
+                            }
                           }}
-                          title="Edit Product"
-                          className="p-1.5 rounded-xl text-slate-400 hover:text-blue-400 hover:bg-[#152445] transition-colors cursor-pointer"
+                          className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl bg-rose-500/10 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30 transition-all cursor-pointer active:scale-95"
+                          title="Remove item from bill"
+                          aria-label="Remove item"
                         >
-                          <Edit2 className="w-3.5 h-3.5" />
+                          <X className="w-4 h-4 stroke-[2.5]" />
                         </button>
-                      )}
-
-                      {/* Dedicated Click to Add Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => handleDirectAdd(e)}
-                        disabled={isOutOfStock}
-                        title="Click to Add"
-                        className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md cursor-pointer ${
-                          isOutOfStock
-                            ? 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed opacity-60'
-                            : isCartFull
-                            ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-900/30 active:scale-95'
-                            : inCart > 0
-                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/30 active:scale-95'
-                            : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/40 active:scale-95'
-                        }`}
-                      >
-                        <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                        <span className="hidden sm:inline">
-                          {isOutOfStock ? 'Sold Out' : inCart > 0 ? `Add (${inCart})` : 'Click to Add'}
-                        </span>
-                        <span className="sm:hidden">
-                          {isOutOfStock ? 'Sold' : inCart > 0 ? `+${inCart}` : 'Add'}
-                        </span>
-                      </button>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )
-        ) : (
-          <div className="py-8 text-center text-slate-500 text-xs space-y-2">
-            <p>No products found matching &quot;{searchQuery}&quot;</p>
-            <div className="flex items-center justify-center gap-2">
-              {onOpenAddProduct && (
-                <button
-                  type="button"
-                  onClick={onOpenAddProduct}
-                  className="px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-500 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Add New Product
-                </button>
-              )}
-            </div>
+                  );
+                })}
+
+                <div className="pt-2 border-t border-[#17253d] flex items-center justify-between px-1 text-xs">
+                  <span className="font-mono text-slate-400">
+                    Total Scanned: <strong className="text-slate-200">{cart.reduce((a, c) => a + c.quantity, 0)} units</strong>
+                  </span>
+                  <span className="font-mono text-blue-400 font-bold">
+                    {formatCurrency(
+                      cart.reduce((a, c) => a + c.unitPrice * c.quantity, 0),
+                      currencySymbol
+                    )}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="py-8 px-4 text-center bg-[#070d1a] border border-[#142038] border-dashed rounded-2xl space-y-2">
+                <QrCode className="w-8 h-8 text-blue-400/50 mx-auto animate-pulse" />
+                <p className="text-xs font-bold text-slate-300">No scanned products yet</p>
+                <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
+                  Scan any product QR code or enter SKU above. Scanned items will be added directly into this list.
+                </p>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Quick Quantity Picker Modal */}
       {quantityModalProduct && (

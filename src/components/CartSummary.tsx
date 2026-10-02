@@ -125,9 +125,9 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
   };
 
   return (
-    <div id="cart-summary-panel" className="space-y-4">
-      {/* TOTAL AMOUNT Box Matching Reference UI Top Box */}
-      <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl px-4 pt-2.5 pb-3">
+    <div id="cart-summary-panel" className="space-y-3.5">
+      {/* TOTAL AMOUNT Box - Styled as Layered Papercut Total Card */}
+      <div className="bg-[#0b1428] border border-[#1d3154] rounded-2xl px-4 pt-3 pb-3.5 paper-sheet-1">
         <div className="flex items-center justify-between">
           <label className="block text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono">
             TOTAL AMOUNT
@@ -137,14 +137,14 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
               <button
                 type="button"
                 onClick={onHoldCart}
-                className="text-[10px] text-amber-400 hover:underline font-bold uppercase tracking-wider flex items-center gap-1"
+                className="text-[10px] text-amber-400 hover:text-amber-300 font-bold uppercase tracking-wider flex items-center gap-1 transition-colors cursor-pointer paper-card px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/30"
               >
                 <PauseCircle className="w-3 h-3" /> HOLD
               </button>
               <button
                 type="button"
                 onClick={onClearCart}
-                className="text-[10px] text-slate-400 hover:text-rose-400 font-bold uppercase tracking-wider"
+                className="text-[10px] text-slate-400 hover:text-rose-400 font-bold uppercase tracking-wider transition-colors cursor-pointer px-2 py-0.5 rounded-lg hover:bg-rose-500/10"
               >
                 CLEAR
               </button>
@@ -153,7 +153,7 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
         </div>
 
         <div className="flex items-baseline justify-between mt-1">
-          <span className="text-2xl font-black text-slate-100 font-mono tracking-tight">
+          <span className="text-2xl sm:text-3xl font-black text-slate-100 font-mono tracking-tight text-emerald-400">
             {formatCurrency(calculation.grandTotal, currencySymbol)}
           </span>
           <span className="text-xs text-slate-400 font-mono font-medium">
@@ -169,7 +169,7 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
             <span className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono">
               CART ITEMS
             </span>
-            <span className="px-2 py-0.5 rounded-full bg-[#152442] text-blue-400 text-[10px] font-bold font-mono">
+            <span className="px-2 py-0.5 rounded-full bg-[#13223f] text-blue-300 border border-blue-500/20 text-[10px] font-bold font-mono shadow-xs">
               {cart.length} {cart.length === 1 ? 'ITEM' : 'ITEMS'}
             </span>
           </div>
@@ -178,7 +178,7 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
             <button
               type="button"
               onClick={() => setShowDiscountInput(!showDiscountInput)}
-              className="text-blue-400 hover:text-blue-300 font-mono"
+              className="text-blue-400 hover:text-blue-300 font-mono cursor-pointer"
             >
               {billDiscount.value > 0 ? `DISCOUNT: ${billDiscount.value}%` : '+ DISCOUNT'}
             </button>
@@ -187,8 +187,8 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
 
         {/* Discount Inline Drawer */}
         {showDiscountInput && (
-          <div className="mb-2 p-2.5 bg-[#0a101d] border border-[#1b2b48] rounded-xl flex items-center justify-between gap-2">
-            <span className="text-xs text-slate-400">Discount %:</span>
+          <div className="mb-2 p-2.5 bg-[#060c18] border border-[#182a4a] rounded-2xl flex items-center justify-between gap-2 paper-recessed">
+            <span className="text-xs text-slate-400 font-mono">Discount %:</span>
             <input
               type="number"
               min="0"
@@ -199,13 +199,13 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
                 setDiscountVal(e.target.value);
                 handleApplyDiscount(parseFloat(e.target.value) || 0);
               }}
-              className="w-20 bg-[#121d36] border border-[#1e3054] rounded-lg px-2 py-1 text-xs font-mono text-slate-100 focus:outline-none focus:border-blue-500"
+              className="w-20 bg-[#121d36] border border-[#1e3054] rounded-xl px-2.5 py-1 text-xs font-mono text-slate-100 focus:outline-none focus:border-blue-500"
               autoFocus
             />
             <button
               type="button"
               onClick={() => setShowDiscountInput(false)}
-              className="text-xs text-slate-400 hover:text-slate-200"
+              className="text-xs text-slate-400 hover:text-slate-200 font-mono cursor-pointer"
             >
               Done
             </button>
@@ -222,10 +222,10 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
               return (
                 <div
                   key={item.id}
-                  className="bg-[#0b1325] border border-[#1a2b47] rounded-2xl p-3 flex items-center justify-between gap-2 transition-all shadow-xs"
+                  className="bg-[#0b1428] border border-[#1b2e50] rounded-2xl p-3 flex items-center justify-between gap-2 transition-all paper-card"
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
-                    {/* Active check icon matching reference image */}
+                    {/* Active check icon */}
                     <div className="w-5 h-5 rounded-md bg-blue-600 flex items-center justify-center text-white shrink-0 shadow-xs">
                       <Check className="w-3.5 h-3.5 stroke-[3]" />
                     </div>
@@ -270,14 +270,14 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
 
                   {/* Quantity Stepper & Price */}
                   <div className="flex items-center gap-2 shrink-0">
-                    <div className="flex items-center bg-[#101b33] border border-[#1b2b48] rounded-xl overflow-hidden shadow-xs">
+                    <div className="flex items-center bg-[#060c18] border border-blue-500/40 rounded-xl overflow-hidden paper-recessed">
                       <button
                         type="button"
                         onClick={() => onUpdateQuantity(item.id, item.quantity - 1)}
-                        className="w-6 h-7 flex items-center justify-center text-slate-400 hover:text-slate-100 hover:bg-[#18284a] text-xs transition-colors cursor-pointer"
+                        className="w-6.5 h-7 flex items-center justify-center text-slate-400 hover:text-slate-100 hover:bg-[#18284a] text-xs transition-colors cursor-pointer"
                         title="Decrease quantity"
                       >
-                        <Minus className="w-3 h-3" />
+                        <Minus className="w-3 h-3 stroke-[2.5]" />
                       </button>
 
                       <input
@@ -318,7 +318,7 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
                           }
                           onUpdateQuantity(item.id, item.quantity + 1);
                         }}
-                        className={`w-6 h-7 flex items-center justify-center text-xs transition-colors cursor-pointer ${
+                        className={`w-6.5 h-7 flex items-center justify-center text-xs transition-colors cursor-pointer ${
                           item.quantity >= (item.product.stock ?? 999)
                             ? 'text-slate-600 hover:text-amber-400 hover:bg-[#201c10]'
                             : 'text-slate-400 hover:text-slate-100 hover:bg-[#18284a]'
@@ -329,7 +329,7 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
                             : 'Increase quantity'
                         }
                       >
-                        <Plus className="w-3 h-3" />
+                        <Plus className="w-3 h-3 stroke-[2.5]" />
                       </button>
                     </div>
 
@@ -340,7 +340,7 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
                     <button
                       type="button"
                       onClick={() => onRemoveItem(item.id)}
-                      className="p-1 text-slate-500 hover:text-rose-400 rounded-md cursor-pointer transition-colors"
+                      className="p-1 text-slate-500 hover:text-rose-400 rounded-lg cursor-pointer transition-colors"
                       title="Remove item"
                     >
                       <X className="w-3.5 h-3.5" />
@@ -360,7 +360,7 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
       </div>
 
       {/* CUSTOMER WHATSAPP DETAILS SECTION */}
-      <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl px-4 pt-2.5 pb-3">
+      <div className="bg-[#0b1428] border border-[#1d3154] rounded-2xl px-4 pt-3 pb-3.5 paper-sheet-2">
         <div className="flex items-center justify-between mb-1.5">
           <label className="text-[10px] font-extrabold text-emerald-400 tracking-wider uppercase font-mono flex items-center gap-1.5">
             <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
@@ -370,7 +370,7 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
             <button
               type="button"
               onClick={() => setIsEditingCustomerPhone(!isEditingCustomerPhone)}
-              className="text-[10px] text-blue-400 hover:text-blue-300 font-mono font-bold"
+              className="text-[10px] text-blue-400 hover:text-blue-300 font-mono font-bold cursor-pointer"
             >
               {isEditingCustomerPhone ? 'Done' : 'Edit Number'}
             </button>
@@ -378,9 +378,9 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
         </div>
 
         {customer && !isEditingCustomerPhone ? (
-          <div className="flex items-center justify-between bg-[#0e172a] border border-emerald-500/30 rounded-lg p-2.5">
+          <div className="flex items-center justify-between bg-[#060c18] border border-emerald-500/30 rounded-xl p-2.5 paper-recessed">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-7 h-7 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center font-mono shrink-0">
+              <div className="w-7 h-7 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center font-mono shrink-0 shadow-xs">
                 {customer.name ? customer.name.charAt(0).toUpperCase() : 'C'}
               </div>
               <div className="min-w-0">
@@ -391,7 +391,7 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
                 </p>
               </div>
             </div>
-            <span className="text-[10px] bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 px-2 py-0.5 rounded-md font-mono font-bold shrink-0">
+            <span className="text-[10px] bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 px-2 py-0.5 rounded-md font-mono font-bold shrink-0 shadow-xs">
               PDF Target
             </span>
           </div>
@@ -404,7 +404,7 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
                   placeholder="Customer WhatsApp (10 digits)"
                   value={quickPhone}
                   onChange={(e) => setQuickPhone(e.target.value)}
-                  className="w-full bg-[#0e172a] border border-[#1b2b48] focus:border-emerald-500 rounded-lg px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none placeholder:text-slate-500"
+                  className="w-full bg-[#060c18] border border-[#182a4a] focus:border-emerald-500 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none placeholder:text-slate-500 paper-recessed"
                 />
               </div>
               <div className="relative">
@@ -413,7 +413,7 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
                   placeholder="Customer Name (Optional)"
                   value={quickName}
                   onChange={(e) => setQuickName(e.target.value)}
-                  className="w-full bg-[#0e172a] border border-[#1b2b48] focus:border-blue-500 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none placeholder:text-slate-500"
+                  className="w-full bg-[#060c18] border border-[#182a4a] focus:border-blue-500 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none placeholder:text-slate-500 paper-recessed"
                 />
               </div>
             </div>
@@ -426,7 +426,7 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
                 <button
                   type="button"
                   onClick={handleSaveQuickCustomer}
-                  className="text-emerald-400 hover:text-emerald-300 font-bold font-mono underline"
+                  className="text-emerald-400 hover:text-emerald-300 font-bold font-mono underline cursor-pointer"
                 >
                   Save to Bill
                 </button>
@@ -436,19 +436,19 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
         )}
       </div>
 
-      {/* WHO PAID? / PAYMENT MODE Selector Box matching Reference Image */}
-      <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl px-4 pt-2.5 pb-2">
-        <label className="block text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono mb-1">
+      {/* WHO PAID? / PAYMENT MODE Selector Box */}
+      <div className="bg-[#0b1428] border border-[#1d3154] rounded-2xl px-4 pt-3 pb-3 paper-sheet-2">
+        <label className="block text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono mb-1.5">
           PAYMENT METHOD
         </label>
-        <div className="grid grid-cols-3 gap-1.5">
+        <div className="grid grid-cols-3 gap-2">
           <button
             type="button"
             onClick={() => setSelectedPaymentMode('upi')}
-            className={`py-2 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+            className={`py-2.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer paper-card active:scale-95 ${
               selectedPaymentMode === 'upi'
-                ? 'bg-[#15274d] text-blue-400 border border-blue-500/50'
-                : 'bg-transparent text-slate-400 hover:text-slate-200'
+                ? 'bg-[#15274d] text-blue-400 border border-blue-500/60 shadow-blue-950/40'
+                : 'bg-[#081020] border border-[#17253d] text-slate-400 hover:text-slate-200'
             }`}
           >
             <QrCode className="w-3.5 h-3.5" />
@@ -458,10 +458,10 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
           <button
             type="button"
             onClick={() => setSelectedPaymentMode('cash')}
-            className={`py-2 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+            className={`py-2.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer paper-card active:scale-95 ${
               selectedPaymentMode === 'cash'
-                ? 'bg-[#15274d] text-blue-400 border border-blue-500/50'
-                : 'bg-transparent text-slate-400 hover:text-slate-200'
+                ? 'bg-[#15274d] text-blue-400 border border-blue-500/60 shadow-blue-950/40'
+                : 'bg-[#081020] border border-[#17253d] text-slate-400 hover:text-slate-200'
             }`}
           >
             <Banknote className="w-3.5 h-3.5" />
@@ -471,10 +471,10 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
           <button
             type="button"
             onClick={() => setSelectedPaymentMode('whatsapp')}
-            className={`py-2 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+            className={`py-2.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer paper-card active:scale-95 ${
               selectedPaymentMode === 'whatsapp'
-                ? 'bg-[#0f2d26] text-emerald-400 border border-emerald-500/50'
-                : 'bg-transparent text-slate-400 hover:text-slate-200'
+                ? 'bg-[#0f2d26] text-emerald-400 border border-emerald-500/60 shadow-emerald-950/40'
+                : 'bg-[#081020] border border-[#17253d] text-slate-400 hover:text-slate-200'
             }`}
           >
             <Send className="w-3.5 h-3.5 text-emerald-400" />
@@ -483,15 +483,15 @@ export const CartSummary: React.FC<CartSummaryProps> = ({
         </div>
       </div>
 
-      {/* PRIMARY CTA BUTTON: Large Royal Blue Button matching Reference UI */}
+      {/* PRIMARY CTA BUTTON: Large Royal Blue Button */}
       <button
         id="btn-proceed-to-payment"
         type="button"
         disabled={cart.length === 0}
         onClick={handleProceed}
-        className={`w-full py-3.5 px-4 rounded-2xl text-sm font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg ${
+        className={`w-full py-3.5 px-4 rounded-2xl text-sm font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer ${
           cart.length > 0
-            ? 'bg-blue-600 hover:bg-blue-500 text-white cursor-pointer active:scale-[0.99] shadow-blue-900/40'
+            ? 'bg-blue-600 hover:bg-blue-500 text-white paper-btn-primary'
             : 'bg-[#121c33] text-slate-500 cursor-not-allowed border border-[#1b2b48]'
         }`}
       >

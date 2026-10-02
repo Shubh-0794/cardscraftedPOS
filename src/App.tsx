@@ -17,6 +17,8 @@ import { posAudio } from './utils/audio';
 
 import { Navbar } from './components/Navbar';
 import { TabBar, ActiveTab } from './components/TabBar';
+import { HomeDashboard } from './components/HomeDashboard';
+import { ProductsTab } from './components/ProductsTab';
 import { CustomerInput } from './components/CustomerInput';
 import { BarcodeScanner } from './components/BarcodeScanner';
 import { CartSummary } from './components/CartSummary';
@@ -105,7 +107,7 @@ export default function App() {
   });
 
   // Active Tab navigation matching the reference UI
-  const [activeTab, setActiveTab] = useState<ActiveTab>('add');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('home');
 
   // Modals & Active Overlays
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -738,7 +740,7 @@ export default function App() {
 
   // Remove single item
   const handleRemoveItem = useCallback((itemId: string) => {
-    setCart((prevCart) => prevCart.filter((item) => item.id !== itemId));
+    setCart((prevCart) => prevCart.filter((item) => item.id !== itemId && item.product.id !== itemId));
   }, []);
 
   // Update item quantity with strict stock limit validation & audio alert
@@ -751,7 +753,7 @@ export default function App() {
 
       setCart((prevCart) =>
         prevCart.map((item) => {
-          if (item.id === itemId) {
+          if (item.id === itemId || item.product.id === itemId) {
             const maxStock = typeof item.product.stock === 'number' ? Math.max(0, item.product.stock) : 999;
             let validatedQty = newQty;
 
@@ -1211,8 +1213,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Centered Mobile/Compact Card Container matching the Reference UI Screenshot */}
-      <div className="w-full sm:max-w-xl bg-[#0c1427] sm:border sm:border-[#1b2b48] sm:rounded-3xl rounded-none border-0 shadow-2xl overflow-hidden flex flex-col min-h-screen sm:min-h-0">
+      {/* Main Centered Mobile/Compact Card Container with Layered Papercut Craft Frame */}
+      <div className="w-full sm:max-w-xl bg-[#0c1528] sm:border sm:border-[#1d3054] sm:rounded-3xl rounded-none border-0 paper-frame overflow-hidden flex flex-col min-h-screen sm:min-h-0 relative z-10">
         {/* Top Header */}
         <Navbar
           settings={settings}
@@ -1228,17 +1230,42 @@ export default function App() {
           isSyncing={isCloudSyncing}
         />
 
-        {/* Segmented Tabs: ADD, TOTAL, PRE ORDER, PEOPLE, HISTORY */}
-        <TabBar
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          cartItemCount={cart.reduce((acc, it) => acc + it.quantity, 0)}
-          customerSelected={Boolean(selectedCustomer)}
-          activePreOrdersCount={preOrders.filter((p) => p.status === 'advance_paid').length}
-        />
-
         {/* Tab Body View */}
-        <main className="p-3.5 sm:p-5 flex-1 min-h-[460px] flex flex-col justify-between">
+        <main className="p-3.5 sm:p-5 flex-1 min-h-[460px] flex flex-col justify-between overflow-y-auto">
+          {activeTab === 'home' && (
+            <HomeDashboard
+              products={products}
+              customers={customers}
+              invoices={invoices}
+              settings={settings}
+              onNavigateTab={(tab) => setActiveTab(tab as ActiveTab)}
+              onAddToCart={(prod, qty) => {
+                handleAddToCart(prod, qty);
+                posAudio.playScanBeep();
+              }}
+              onSelectCustomer={(cust) => {
+                setSelectedCustomer(cust);
+              }}
+              onOpenQuickAddProduct={() => {
+                setProductToEdit(null);
+                setIsProductFormOpen(true);
+              }}
+              onOpenInventory={() => setActiveTab('products')}
+            />
+          )}
+
+          {activeTab === 'products' && (
+            <ProductsTab
+              products={products}
+              onSaveProduct={handleSaveProduct}
+              onDeleteProduct={handleDeleteProduct}
+              currencySymbol={settings.currencySymbol}
+              settings={settings}
+              onViewBarcode={handleOpenBarcodeViewer}
+              onQuickNewSale={() => setActiveTab('add')}
+            />
+          )}
+
           {activeTab === 'add' && (
             <div className="space-y-4 animate-in fade-in duration-200">
               {/* Customer quick select bar */}
@@ -1258,6 +1285,9 @@ export default function App() {
                 onAddToCart={(prod, qty) => {
                   handleAddToCart(prod, qty);
                 }}
+                onUpdateQuantity={handleUpdateQuantity}
+                onRemoveItem={handleRemoveItem}
+                onProceedToCheckout={() => setActiveTab('total')}
                 onOpenQuickAddProduct={(code) => setQuickAddBarcode(code)}
                 onOpenAddProduct={() => {
                   setProductToEdit(null);
@@ -1627,14 +1657,19 @@ export default function App() {
               )}
             </div>
           )}
-
-          {/* Bottom Footer matching the Reference UI */}
-          <footer className="mt-5 pt-3 border-t border-[#1b2b48] text-center">
-            <p className="text-[11px] font-bold text-slate-500 tracking-wider font-mono">
-              SYNCED WITH UPI &amp; WHATSAPP • MADE WITH <span className="text-rose-500">❤️</span>
-            </p>
-          </footer>
         </main>
+
+        {/* Bottom Curved Dock Navigation Bar matching sketch */}
+        <TabBar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          cartItemCount={cart.reduce((acc, it) => acc + it.quantity, 0)}
+          customerSelected={Boolean(selectedCustomer)}
+          activePreOrdersCount={preOrders.filter((p) => p.status === 'advance_paid').length}
+          onQuickNewSale={() => {
+            setActiveTab('add');
+          }}
+        />
       </div>
 
       {/* MODALS */}

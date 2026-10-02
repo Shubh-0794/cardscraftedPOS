@@ -144,30 +144,30 @@ export const CustomerInput: React.FC<CustomerInputProps> = ({
   return (
     <div id="customer-onboarding-panel" className="relative" ref={dropdownRef}>
       {customer ? (
-        // Selected Customer Card matching Reference UI
-        <div className="bg-[#0a101d] border border-blue-500/40 rounded-xl px-4 py-2.5 flex items-center justify-between">
+        // Selected Customer Card matching Reference UI - Layered Papercut Card
+        <div className="bg-[#0a1428] border border-blue-500/40 rounded-2xl px-4 py-3 flex items-center justify-between paper-sheet-2">
           <div className="flex items-center gap-3 min-w-0">
-            <div className={`w-8 h-8 rounded-full font-bold text-xs flex items-center justify-center font-mono shrink-0 ${
+            <div className={`w-9 h-9 rounded-xl font-bold text-xs flex items-center justify-center font-mono shrink-0 paper-card ${
               highestSpender && customer.id === highestSpender.id
-                ? 'bg-linear-to-tr from-amber-600 to-yellow-400 text-slate-950 ring-2 ring-amber-400/60 shadow-md shadow-amber-500/20'
-                : 'bg-blue-600 text-white'
+                ? 'bg-gradient-to-tr from-amber-600 to-yellow-400 text-slate-950 ring-2 ring-amber-400/60 shadow-md shadow-amber-500/20'
+                : 'bg-blue-600 text-white shadow-blue-900/40'
             }`}>
               {customer.name ? customer.name.charAt(0).toUpperCase() : 'C'}
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-bold text-xs text-slate-100 truncate">{customer.name}</span>
+                <span className="font-bold text-xs sm:text-sm text-slate-100 truncate">{customer.name}</span>
                 {highestSpender && customer.id === highestSpender.id && (
                   <span className="text-[10px] text-amber-300 font-mono font-bold bg-amber-950/80 border border-amber-400/50 px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-xs">
                     <Crown className="w-3 h-3 text-amber-400 fill-amber-400/40" />
                     Top Customer
                   </span>
                 )}
-                <span className="text-[10px] text-emerald-400 font-mono font-bold bg-emerald-950/60 border border-emerald-500/30 px-1.5 py-0.2 rounded-md">
+                <span className="text-[10px] text-emerald-400 font-mono font-bold bg-emerald-950/60 border border-emerald-500/30 px-1.5 py-0.2 rounded-md shadow-xs">
                   LINKED
                 </span>
                 {customer.loyaltyPoints > 0 && (
-                  <span className="text-[10px] text-amber-400 font-mono font-bold bg-amber-950/50 border border-amber-500/30 px-1.5 py-0.2 rounded-md flex items-center gap-0.5">
+                  <span className="text-[10px] text-amber-400 font-mono font-bold bg-amber-950/50 border border-amber-500/30 px-1.5 py-0.2 rounded-md flex items-center gap-0.5 shadow-xs">
                     <Award className="w-2.5 h-2.5" /> {customer.loyaltyPoints} pts
                   </span>
                 )}
@@ -188,7 +188,7 @@ export const CustomerInput: React.FC<CustomerInputProps> = ({
                 type="button"
                 onClick={(e) => handleStartEdit(customer, e)}
                 title="Edit Customer Details"
-                className="p-1.5 text-slate-400 hover:text-blue-400 rounded-lg hover:bg-blue-500/10 transition-colors flex items-center gap-1 text-[11px] font-semibold"
+                className="p-1.5 text-slate-400 hover:text-blue-400 rounded-xl hover:bg-blue-500/10 transition-all flex items-center gap-1 text-[11px] font-semibold cursor-pointer paper-card active:scale-95"
               >
                 <Edit2 className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Edit</span>
@@ -198,7 +198,7 @@ export const CustomerInput: React.FC<CustomerInputProps> = ({
               id="btn-remove-customer"
               type="button"
               onClick={() => onSelectCustomer(null)}
-              className="text-[11px] text-slate-400 hover:text-slate-200 px-2 py-1 rounded-lg hover:bg-[#14203a] font-semibold transition-colors"
+              className="text-[11px] text-slate-300 hover:text-white px-2.5 py-1 rounded-xl bg-[#142343] hover:bg-[#1a2e58] border border-[#233c6d] font-semibold transition-all cursor-pointer paper-card active:scale-95"
             >
               Change
             </button>
@@ -207,7 +207,7 @@ export const CustomerInput: React.FC<CustomerInputProps> = ({
                 type="button"
                 onClick={() => setCustomerToDelete(customer)}
                 title="Delete customer record from Supabase & POS"
-                className="p-1.5 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors"
+                className="p-1.5 text-slate-400 hover:text-rose-400 rounded-xl hover:bg-rose-500/10 transition-all cursor-pointer paper-card active:scale-95"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -215,8 +215,8 @@ export const CustomerInput: React.FC<CustomerInputProps> = ({
           </div>
         </div>
       ) : (
-        // Input Box with Floating Micro-Label
-        <div className="bg-[#0a101d] border border-[#1b2b48] rounded-xl px-4 pt-2.5 pb-2 focus-within:border-blue-500 transition-colors">
+        // Input Box with Floating Micro-Label - Recessed Paper Cutout Well
+        <div className="bg-[#060c18] border border-[#182a4a] rounded-2xl px-4 pt-2.5 pb-2 focus-within:border-blue-500 transition-all paper-recessed">
           <label className="block text-[10px] font-extrabold text-slate-400 tracking-wider uppercase font-mono">
             CUSTOMER (WHATSAPP RECEIPT)
           </label>
@@ -236,7 +236,7 @@ export const CustomerInput: React.FC<CustomerInputProps> = ({
             <button
               type="button"
               onClick={() => setShowAddModal(true)}
-              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-colors shrink-0 cursor-pointer"
+              className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 transition-all shrink-0 cursor-pointer paper-btn-primary"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>New</span>
@@ -245,7 +245,7 @@ export const CustomerInput: React.FC<CustomerInputProps> = ({
 
           {/* Dropdown options */}
           {isOpenDropdown && (
-            <div className="absolute left-0 right-0 top-full mt-2 bg-[#0c1427] border border-[#1b2b48] rounded-2xl shadow-2xl z-40 overflow-hidden max-h-64 overflow-y-auto divide-y divide-[#152442]">
+            <div className="absolute left-0 right-0 top-full mt-2 bg-[#091224] border border-[#1b2f52] rounded-2xl paper-sheet-1 z-40 overflow-hidden max-h-64 overflow-y-auto divide-y divide-[#152542]">
               {filteredCustomers.length > 0 ? (
                 filteredCustomers.map((c) => (
                   <div
